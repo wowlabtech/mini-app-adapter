@@ -37,3 +37,7 @@ export {
   AdapterProvider,
   useMiniAppAdapter,
 } from '@/components/AdapterProvider';
+
+export {
+  getActiveAdapter,
+} from '@/registry';

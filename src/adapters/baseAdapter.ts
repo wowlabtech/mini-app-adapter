@@ -11,6 +11,7 @@ import {
   type MiniAppPlatform,
   type MiniAppPopupOptions,
   type MiniAppQrScanOptions,
+  type MiniAppViewportInsets,
 } from '@/types/miniApp';
 
 export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
@@ -25,7 +26,7 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     };
   }
 
-  supports(_capability: MiniAppCapability): boolean {
+  supports(_capability: MiniAppCapability): boolean | Promise<boolean> {
     return false;
   }
 
@@ -79,6 +80,31 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     // No-op by default.
   }
 
+  onAppearanceChange(callback: (appearance: 'dark' | 'light' | undefined) => void): () => void {
+    callback(this.environment.appearance as 'dark' | 'light' | undefined);
+    return () => {};
+  }
+
+  getInitData(): string | undefined {
+    return undefined;
+  }
+
+  getLaunchParams(): unknown {
+    return undefined;
+  }
+
+  decodeStartParam(_param: string): unknown {
+    return undefined;
+  }
+
+  requestFullscreen(): void {
+    // No-op by default.
+  }
+
+  getViewportInsets(): MiniAppViewportInsets | undefined {
+    return undefined;
+  }
+
   bindCssVariables(_mapper?: (key: string) => string): void {
     // No-op by default.
   }
@@ -104,5 +130,17 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   async scanQRCode(_options?: MiniAppQrScanOptions): Promise<string | null> {
     return null;
+  }
+
+  async requestPhone(): Promise<string | null> {
+    return null;
+  }
+
+  enableVerticalSwipes(): void {
+    // No-op by default.
+  }
+
+  disableVerticalSwipes(): void {
+    // No-op by default.
   }
 }

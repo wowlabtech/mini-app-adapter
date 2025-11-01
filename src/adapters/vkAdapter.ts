@@ -1,4 +1,5 @@
 import bridge, {
+  AnyRequestMethodName,
   parseURLSearchParamsForGetLaunchParams,
   type AppearanceType,
   type GetLaunchParamsResponse,
@@ -7,10 +8,16 @@ import bridge, {
 } from '@vkontakte/vk-bridge';
 
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
-import type { MiniAppEnvironmentInfo, MiniAppInitOptions } from '@/types/miniApp';
+import type {
+  MiniAppCapability,
+  MiniAppEnvironmentInfo,
+  MiniAppInitOptions,
+} from '@/types/miniApp';
 
 export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   private unsubscribe?: () => void;
+  private launchParams?: GetLaunchParamsResponse;
+  private queryParams?: Record<string, unknown>;
 
   constructor() {
     super('vk');
@@ -26,8 +33,11 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     this.unsubscribe = () => bridge.unsubscribe(handler);
 
     await bridge.send('VKWebAppInit');
-    const launchParams = await bridge.send('VKWebAppGetLaunchParams');
-    const queryParams = parseURLSearchParamsForGetLaunchParams(window.location.search);
+  const launchParams = await bridge.send('VKWebAppGetLaunchParams');
+  const queryParams = parseURLSearchParamsForGetLaunchParams(window.location.search);
+
+  this.launchParams = launchParams;
+  this.queryParams = queryParams as Record<string, unknown>;
 
     this.environment = this.composeEnvironment(launchParams, queryParams);
     this.applyAppearance(this.environment.appearance);
@@ -35,7 +45,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     this.ready = true;
   }
 
-  override async setColors(colors: { header?: string; background?: string }): Promise<void> {
+  override async setColors(colors: { header?: string; background?: string; }): Promise<void> {
     const { header, background } = colors;
 
     if (header || background) {
@@ -58,6 +68,54 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       ...this.environment,
       isWebView: bridge.isWebView(),
     };
+  }
+
+  override getLaunchParams(): unknown {
+    if (!this.launchParams) {
+      return undefined;
+    }
+
+    return {
+      launchParams: this.launchParams,
+      queryParams: this.queryParams,
+    };
+  }
+
+  override async supports(capability: MiniAppCapability): Promise<boolean> {
+    if (capability === 'requestPhone') {
+      const [supportsPhoneNumber, supportsPersonalCard] = await Promise.all([
+        this.isBridgeMethodSupported('VKWebAppGetPhoneNumber'),
+        this.isBridgeMethodSupported('VKWebAppGetPersonalCard'),
+      ]);
+      return supportsPhoneNumber || supportsPersonalCard;
+    }
+
+    return await super.supports(capability);
+  }
+
+  override async requestPhone(): Promise<string | null> {
+    const [supportsPhoneNumber, supportsPersonalCard] = await Promise.all([
+      this.isBridgeMethodSupported('VKWebAppGetPhoneNumber'),
+      this.isBridgeMethodSupported('VKWebAppGetPersonalCard'),
+    ]);
+    if (!supportsPhoneNumber && !supportsPersonalCard) {
+      return super.requestPhone();
+    }
+
+    try {
+      if (supportsPhoneNumber) {
+        const result = await bridge.send('VKWebAppGetPhoneNumber');
+        const phoneNumber = (result as { phone_number?: unknown }).phone_number;
+        return typeof phoneNumber === 'string' && phoneNumber ? phoneNumber : null;
+      }
+
+      const card = await bridge.send('VKWebAppGetPersonalCard', { type: ['phone'] });
+      const phone = (card as { phone?: unknown }).phone;
+      return typeof phone === 'string' && phone ? phone : null;
+    } catch (error) {
+      console.warn('[tvm-app-adapter] VK requestPhone failed:', error);
+      return null;
+    }
   }
 
   dispose(): void {
@@ -93,6 +151,8 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     this.environment.appearance = config.appearance ?? this.environment.appearance;
     this.applyAppearance(this.environment.appearance);
 
+    console.log('config :>> ', config);
+
     if ('insets' in config && config.insets) {
       const { top = 0, right = 0, bottom = 0, left = 0 } = config.insets;
       this.environment.safeArea = { top, right, bottom, left };
@@ -121,5 +181,18 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
 
     const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     return luminance > 0.6 ? 'dark' : 'light';
+  }
+
+  private async isBridgeMethodSupported(method: AnyRequestMethodName): Promise<boolean> {
+    if (typeof bridge.supportsAsync === 'function') {
+      try {
+        return await bridge.supportsAsync(method);
+      } catch (error) {
+        console.warn('[tvm-app-adapter] VK bridge.supportsAsync failed:', error);
+        return false;
+      }
+    }
+
+    return bridge.supports?.(method) ?? false;
   }
 }

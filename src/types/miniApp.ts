@@ -20,6 +20,18 @@ export interface MiniAppEnvironmentInfo {
   };
 }
 
+export interface MiniAppSafeAreaInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export interface MiniAppViewportInsets {
+  safeArea: MiniAppSafeAreaInsets;
+  contentSafeArea: MiniAppSafeAreaInsets;
+}
+
 export interface MiniAppInitOptions {
   /**
    * Enables verbose logs for platforms that support it.
@@ -41,7 +53,8 @@ export type MiniAppCapability =
   | 'qrScanner'
   | 'closeApp'
   | 'backButtonVisibility'
-  | 'bindCssVariables';
+  | 'bindCssVariables'
+  | 'requestPhone';
 
 export interface MiniAppPopupButton {
   id: string;
@@ -68,7 +81,7 @@ export interface MiniAppAdapter {
   /**
    * Quick capability check before calling platform specific APIs.
    */
-  supports(capability: MiniAppCapability): boolean;
+  supports(capability: MiniAppCapability): boolean | Promise<boolean>;
 
   /**
    * Initializes platform SDK. Safe to call multiple times.
@@ -88,7 +101,7 @@ export interface MiniAppAdapter {
   /**
    * Applies navigation / background colors if supported by the host platform.
    */
-  setColors(colors: { header?: string; background?: string }): Promise<void>;
+  setColors(colors: { header?: string; background?: string; footer?: string }): Promise<void>;
 
   /**
    * Registers a callback for platform back button.
@@ -117,6 +130,36 @@ export interface MiniAppAdapter {
   enableDebug?(state: boolean): void;
 
   /**
+   * Subscribes to appearance changes if supported by the platform.
+   */
+  onAppearanceChange?(callback: (appearance: 'dark' | 'light' | undefined) => void): () => void;
+
+  /**
+   * Provides raw init data string, if available.
+   */
+  getInitData?(): string | undefined;
+
+  /**
+   * Reads platform launch parameters, if available.
+   */
+  getLaunchParams?(): unknown;
+
+  /**
+   * Decodes platform specific start parameter.
+   */
+  decodeStartParam?(param: string): unknown;
+
+  /**
+   * Requests fullscreen mode if supported by the platform.
+   */
+  requestFullscreen?(): void;
+
+  /**
+   * Returns viewport safe area insets if supported by the platform.
+   */
+  getViewportInsets?(): MiniAppViewportInsets | undefined;
+
+  /**
    * Binds platform theme variables to CSS custom properties.
    */
   bindCssVariables(mapper?: (key: string) => string): void;
@@ -129,6 +172,12 @@ export interface MiniAppAdapter {
   vibrateSelection(): void;
 
   /**
+   * Enables or disables vertical swipe gestures if supported by the platform.
+   */
+  enableVerticalSwipes?(): void;
+  disableVerticalSwipes?(): void;
+
+  /**
    * Displays native popup if available.
    * Resolves with button id or null if popup was dismissed.
    */
@@ -138,5 +187,10 @@ export interface MiniAppAdapter {
    * Opens QR scanner and resolves with scanned value (if any).
    */
   scanQRCode(options?: MiniAppQrScanOptions): Promise<string | null>;
+
+  /**
+   * Requests phone number from the host platform if supported.
+   */
+  requestPhone(): Promise<string | null>;
 
 }

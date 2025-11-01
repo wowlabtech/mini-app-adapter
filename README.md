@@ -1,4 +1,4 @@
-# twm-adapter
+# tvm-app-adapter
 
 Cross-platform adapter toolkit for **Telegram**, **VK**, and **MAX** mini apps.  
 Install the package to access unified platform detection, capability checks, and ready-made adapters.
@@ -13,13 +13,13 @@ Install the package to access unified platform detection, capability checks, and
 ## Install
 
 ```bash
-npm install twm-adapter
+npm install tvm-app-adapter
 ```
 
 ## Usage
 
 ```ts
-import { createAdapter } from 'twm-adapter';
+import { createAdapter } from 'tvm-app-adapter';
 
 const adapter = createAdapter(); // auto-detects platform
 await adapter.init();
@@ -32,7 +32,7 @@ if (adapter.supports('haptics')) {
 React integration:
 
 ```tsx
-import { AdapterProvider, createAdapter } from 'twm-adapter';
+import { AdapterProvider, createAdapter } from 'tvm-app-adapter';
 
 const adapter = createAdapter();
 

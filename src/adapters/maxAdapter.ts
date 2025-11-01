@@ -57,9 +57,14 @@ interface MaxWebApp {
   shareContent?: (payload: { text: string; link?: string; requestId: string }) => Promise<unknown>;
   shareMaxContent?: (payload: { text: string; link?: string; requestId: string }) => Promise<unknown>;
   openCodeReader?: (allowFileSelect?: boolean) => Promise<{ requestId: string; value?: string }>;
+  requestPhoneNumber?: () => Promise<unknown>;
   BackButton?: MaxBackButton;
   HapticFeedback?: MaxHapticFeedback;
 }
+
+type MaxPhoneRequestEventDetail = {
+  providePromise: (promise: Promise<unknown>) => void;
+};
 
 function getMaxBridge(): MaxWebApp | undefined {
   return (window as typeof window & { WebApp?: MaxWebApp }).WebApp;
@@ -67,6 +72,8 @@ function getMaxBridge(): MaxWebApp | undefined {
 
 export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
   private readonly backHandlers = new Map<() => void, () => void>();
+  private initData?: string;
+  private initDataUnsafe?: MaxWebApp['initDataUnsafe'];
 
   constructor() {
     super('max');
@@ -79,6 +86,9 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
 
     const bridge = getMaxBridge();
     bridge?.ready?.();
+
+    this.initData = bridge?.initData;
+    this.initDataUnsafe = bridge?.initDataUnsafe;
 
     const environment: MiniAppEnvironmentInfo = {
       platform: 'max',
@@ -104,11 +114,24 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
         return typeof bridge?.close === 'function';
       case 'backButtonVisibility':
         return Boolean(bridge?.BackButton?.show && bridge.BackButton.hide);
+      case 'requestPhone':
+        if (!bridge) {
+          return false;
+        }
+        return typeof bridge.requestPhoneNumber === 'function' || typeof window !== 'undefined';
       case 'popup':
         return false;
       default:
         return false;
     }
+  }
+
+  override getInitData(): string | undefined {
+    return this.initData;
+  }
+
+  override getLaunchParams(): unknown {
+    return this.initDataUnsafe ?? undefined;
   }
 
   override onBackButton(callback: () => void): () => void {
@@ -211,8 +234,86 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
+  override async requestPhone(): Promise<string | null> {
+    const bridge = getMaxBridge();
+    if (bridge?.requestPhoneNumber) {
+      try {
+        const response = await bridge.requestPhoneNumber();
+        return this.extractPhone(response);
+      } catch (error) {
+        console.warn('[mini-app-template] MAX requestPhone failed:', error);
+        return null;
+      }
+    }
+
+    return this.requestPhoneViaEvent();
+  }
+
   override async showPopup(options: MiniAppPopupOptions): Promise<string | null> {
     // MAX bridge does not expose a native popup API yet.
     return super.showPopup(options);
+  }
+
+  private async requestPhoneViaEvent(): Promise<string | null> {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    let providedPromise: Promise<unknown> | undefined;
+    const detail: MaxPhoneRequestEventDetail = {
+      providePromise: (promise) => {
+        providedPromise = promise;
+      },
+    };
+
+    window.dispatchEvent(new CustomEvent<MaxPhoneRequestEventDetail>('WebAppRequestPhone', { detail }));
+
+    if (!providedPromise) {
+      console.warn('[mini-app-template] MAX requestPhone not handled: native promise missing');
+      return null;
+    }
+
+    try {
+      const result = await providedPromise;
+      return this.extractPhone(result);
+    } catch (error) {
+      console.warn('[mini-app-template] MAX requestPhone promise rejected:', error);
+      return null;
+    }
+  }
+
+  private extractPhone(data: unknown): string | null {
+    if (typeof data === 'string') {
+      return data || null;
+    }
+
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    const directPhone = (data as { phone?: unknown; phone_number?: unknown; phoneNumber?: unknown }).phone
+      ?? (data as { phone_number?: unknown }).phone_number
+      ?? (data as { phoneNumber?: unknown }).phoneNumber;
+
+    if (typeof directPhone === 'string' && directPhone) {
+      return directPhone;
+    }
+
+    const contact = (data as { contact?: unknown }).contact;
+    if (contact && typeof contact === 'object') {
+      const nested = (contact as {
+        phone?: unknown;
+        phone_number?: unknown;
+        phoneNumber?: unknown;
+      }).phone
+        ?? (contact as { phone_number?: unknown }).phone_number
+        ?? (contact as { phoneNumber?: unknown }).phoneNumber;
+
+      if (typeof nested === 'string' && nested) {
+        return nested;
+      }
+    }
+
+    return null;
   }
 }

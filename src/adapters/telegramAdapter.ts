@@ -11,14 +11,17 @@ import {
   initData,
   mockTelegramEnv,
   miniApp,
+  openLink,
   popup,
   qrScanner,
+  postEvent,
   retrieveLaunchParams,
   setDebug,
   themeParams,
   viewport,
   type ThemeParams,
 } from '@tma.js/sdk-react';
+import { decodeStartParam, closingBehavior, requestContact, requestPhoneAccess, swipeBehavior } from '@tma.js/sdk';
 
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
 import type {
@@ -27,12 +30,15 @@ import type {
   MiniAppInitOptions,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
+  MiniAppViewportInsets,
 } from '@/types/miniApp';
-
-type TelegramWebApp = NonNullable<typeof window.Telegram>['WebApp'];
-
 export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   private readonly backHandlers = new Map<() => void, () => void>();
+  private cssVariablesBound = false;
+  private readonly appearanceListeners = new Set<
+    (appearance: 'dark' | 'light' | undefined) => void
+  >();
+  private disposeAppearanceWatcher?: () => void;
 
   constructor() {
     super('telegram');
@@ -43,11 +49,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       return;
     }
 
-    const webApp = this.telegram;
-    if (!webApp) {
-      throw new Error('Telegram WebApp SDK is not available in current environment.');
-    }
-
     const debug = Boolean(options?.debug);
     const eruda = Boolean(options?.eruda);
     const mockForMacOS = Boolean(options?.mockForMacOS);
@@ -55,10 +56,14 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     setDebug(debug);
     initSDK();
 
+    if (!miniApp.isSupported()) {
+      console.warn('[tvm-app-adapter] miniApp feature is not supported; falling back to limited mode.');
+    }
+
     if (eruda) {
       void import('eruda').then(({ default: erudaInstance }) => {
         erudaInstance.init();
-        erudaInstance.position({ x: window.innerWidth - 50, y: 0 });
+        erudaInstance.position({ x: window.innerWidth - 50, y: window.innerHeight - 50 });
       });
     }
 
@@ -86,21 +91,29 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       });
     }
 
-    webApp.ready();
+    initData.restore();
 
-    const appearance = (webApp as unknown as { colorScheme?: string }).colorScheme;
+    miniApp.ready();
+
+    const launchParams = retrieveLaunchParams();
+    let appearance: string | undefined;
+    try {
+      appearance = miniApp.isDark() ? 'dark' : 'light';
+    } catch {
+      appearance = undefined;
+    }
 
     const environment: MiniAppEnvironmentInfo = {
       platform: 'telegram',
-      sdkVersion: webApp.version,
-      languageCode: webApp.initDataUnsafe?.user?.language_code,
+      sdkVersion: launchParams.tgWebAppVersion,
+      languageCode: initData.user()?.language_code,
       appearance,
       isWebView: true,
     };
     this.environment = environment;
+    this.notifyAppearance(environment.appearance as 'dark' | 'light' | undefined);
 
     backButton.mount.ifAvailable();
-    initData.restore();
 
     if (miniApp.mount.isAvailable()) {
       themeParams.mount();
@@ -113,70 +126,81 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       viewport.bindCssVars();
     }
 
+    this.setupAppearanceWatcher();
+
     this.ready = true;
   }
 
-  override async setColors(colors: { header?: string; background?: string }): Promise<void> {
-    const webApp = this.telegram;
-    if (!webApp) {
-      return super.setColors(colors);
-    }
+  override async setColors(colors: { header?: string; background?: string; footer?: string }): Promise<void> {
+    const fallback: { header?: string; background?: string; footer?: string } = {};
 
     if (colors.header) {
       if (miniApp.setHeaderColor.isAvailable()) {
         const headerColor = miniApp.setHeaderColor.supports?.('rgb') ? colors.header : 'bg_color';
         miniApp.setHeaderColor(headerColor);
       } else {
-        webApp.setHeaderColor(colors.header);
+        fallback.header = colors.header;
       }
     }
+
     if (colors.background) {
       if (miniApp.setBgColor.isAvailable()) {
         miniApp.setBgColor(colors.background);
       } else {
-        webApp.setBackgroundColor(colors.background);
+        fallback.background = colors.background;
       }
+    }
+
+    if (colors.footer) {
+      if (miniApp.setBgColor.isAvailable()) {
+        miniApp.setBottomBarColorFp(colors.footer);
+      } else {
+        fallback.footer = colors.footer;
+      }
+    }
+
+    if (fallback.header || fallback.background) {
+      await super.setColors(fallback);
     }
   }
 
   override onBackButton(callback: () => void): () => void {
-    const webApp = this.telegram;
-    if (!webApp) {
+    if (!backButton.isSupported()) {
       return super.onBackButton(callback);
     }
 
-    const executor = () => callback();
-    webApp.BackButton.onClick?.(executor);
-    webApp.BackButton.show?.();
-    this.backHandlers.set(callback, executor);
+    const dispose = backButton.onClick(() => callback());
+    this.backHandlers.set(callback, dispose);
+    backButton.show();
 
     return () => {
       const handler = this.backHandlers.get(callback);
       if (handler) {
-        webApp.BackButton.offClick?.(handler);
+        handler();
         this.backHandlers.delete(callback);
       }
       if (!this.backHandlers.size) {
-        webApp.BackButton.hide?.();
+        backButton.hide();
       }
     };
   }
 
   override async openLink(url: string): Promise<void> {
-    const webApp = this.telegram;
-    if (webApp) {
-      webApp.openLink(url, { try_instant_view: true });
+    try {
+      openLink(url, { tryInstantView: true });
       return;
+    } catch {
+      // Fall back to default behaviour if Telegram specific API is not available.
     }
     await super.openLink(url);
   }
 
   enableDebug(state: boolean): void {
-    const webApp = this.telegram;
-    if (!webApp) {
-      return;
+    try {
+      state ? closingBehavior.enableConfirmation() : closingBehavior.disableConfirmation();
+    } catch {
+      // Ignore unsupported environments.
     }
-    state ? webApp.enableClosingConfirmation?.() : webApp.disableClosingConfirmation?.();
   }
 
   override supports(capability: MiniAppCapability): boolean {
@@ -190,16 +214,32 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       case 'closeApp':
         return this.isFeatureAvailable(miniApp.close);
       case 'backButtonVisibility':
-        return this.isFeatureAvailable(backButton.show) && this.isFeatureAvailable(backButton.hide);
+        return backButton.isSupported();
       case 'bindCssVariables':
         return true;
+      case 'requestPhone': {
+        return Boolean(this.isFeatureAvailable(requestPhoneAccess) || this.isFeatureAvailable(requestContact));
+      }
       default:
         return false;
     }
   }
 
   override bindCssVariables(mapper?: (key: string) => string): void {
-    themeParams.bindCssVars(mapper);
+    if (this.cssVariablesBound) {
+      return;
+    }
+
+    try {
+      themeParams.bindCssVars(mapper);
+      this.cssVariablesBound = true;
+    } catch (error) {
+      if (error instanceof Error && /css variables are already bound/i.test(error.message)) {
+        this.cssVariablesBound = true;
+        return;
+      }
+      throw error;
+    }
   }
 
   override vibrateImpact(style: ImpactHapticFeedbackStyle): void {
@@ -266,17 +306,124 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     await super.closeApp();
   }
 
+  override getInitData(): string | undefined {
+    try {
+      return initData.raw();
+    } catch {
+      return undefined;
+    }
+  }
+
+  override getLaunchParams(): unknown {
+    try {
+      return retrieveLaunchParams();
+    } catch {
+      return undefined;
+    }
+  }
+
+  override decodeStartParam(param: string): unknown {
+    try {
+      return decodeStartParam(param);
+    } catch {
+      return undefined;
+    }
+  }
+
+  override requestFullscreen(): void {
+    try {
+      postEvent('web_app_request_fullscreen');
+    } catch {
+      // Ignore unsupported environments.
+    }
+  }
+
+  override getViewportInsets(): MiniAppViewportInsets | undefined {
+    try {
+      const safeArea = viewport.safeAreaInsets();
+      const contentSafeArea = viewport.contentSafeAreaInsets();
+      return {
+        safeArea,
+        contentSafeArea,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  override onAppearanceChange(
+    callback: (appearance: 'dark' | 'light' | undefined) => void,
+  ): () => void {
+    this.appearanceListeners.add(callback);
+    callback(this.environment.appearance as 'dark' | 'light' | undefined);
+    return () => {
+      this.appearanceListeners.delete(callback);
+    };
+  }
+
   override setBackButtonVisibility(visible: boolean): void {
-    if (!this.supports('backButtonVisibility')) {
+    if (!backButton.isSupported()) {
       return;
     }
-    const webApp = this.telegram;
+
     if (visible) {
       backButton.show();
-      webApp?.BackButton.show?.();
     } else {
       backButton.hide();
-      webApp?.BackButton.hide?.();
+    }
+  }
+
+  override enableVerticalSwipes(): void {
+    if (swipeBehavior.enableVertical.isAvailable()) {
+      swipeBehavior.enableVertical();
+    }
+  }
+
+  override disableVerticalSwipes(): void {
+    if (swipeBehavior.disableVertical.isAvailable()) {
+      swipeBehavior.disableVertical();
+    }
+  }
+
+  override async requestPhone(): Promise<string | null> {
+    if (!this.isFeatureAvailable(requestContact)) {
+      return super.requestPhone();
+    }
+
+    if (requestPhoneAccess && this.isFeatureAvailable(requestPhoneAccess)) {
+      try {
+        await requestPhoneAccess();
+      } catch (error) {
+        console.warn('[tvm-app-adapter] Telegram requestPhone access failed:', error);
+      }
+    }
+
+    try {
+      const result = await requestContact();
+      if (!result || typeof result !== 'object') {
+        return null;
+      }
+
+      const contact = (result as {
+        contact?: {
+          phoneNumber?: unknown;
+          phone_number?: unknown;
+          phone?: unknown;
+        };
+        phoneNumber?: unknown;
+        phone_number?: unknown;
+        phone?: unknown;
+      }).contact;
+
+      const phone = (contact?.phoneNumber ?? contact?.phone_number ?? contact?.phone
+        ?? (result as { phoneNumber?: unknown }).phoneNumber
+        ?? (result as { phone_number?: unknown }).phone_number
+        ?? (result as { phone?: unknown }).phone);
+
+      return typeof phone === 'string' && phone ? phone : null;
+    } catch (error) {
+      console.warn('[tvm-app-adapter] Telegram requestPhone failed:', error);
+      return null;
     }
   }
 
@@ -288,7 +435,22 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     return typeof candidate.isAvailable === 'function' ? candidate.isAvailable() : true;
   }
 
-  private get telegram(): TelegramWebApp | undefined {
-    return window.Telegram?.WebApp;
+  private setupAppearanceWatcher(): void {
+    this.disposeAppearanceWatcher?.();
+
+    if (typeof themeParams.isDark?.sub === 'function') {
+      this.disposeAppearanceWatcher = themeParams.isDark.sub(() => {
+        const appearance = themeParams.isDark() ? 'dark' : 'light';
+        this.environment.appearance = appearance;
+        this.notifyAppearance(appearance);
+      });
+    }
   }
+
+  private notifyAppearance(appearance: 'dark' | 'light' | undefined): void {
+    for (const listener of this.appearanceListeners) {
+      listener(appearance);
+    }
+  }
+
 }
