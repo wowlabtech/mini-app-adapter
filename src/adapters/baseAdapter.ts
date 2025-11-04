@@ -19,6 +19,8 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   protected environment: MiniAppEnvironmentInfo;
 
+  private listeners = new Set<() => void>();
+
   protected constructor(platform: MiniAppPlatform, environment?: Partial<MiniAppEnvironmentInfo>) {
     this.environment = {
       platform,
@@ -44,6 +46,13 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   getEnvironment(): MiniAppEnvironmentInfo {
     return { ...this.environment };
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   async setColors(colors: { header?: string; background?: string }): Promise<void> {
@@ -142,5 +151,15 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   disableVerticalSwipes(): void {
     // No-op by default.
+  }
+
+  protected notifyEnvironmentChanged(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.warn('[tvm-app-adapter] environment listener failed:', error);
+      }
+    }
   }
 }

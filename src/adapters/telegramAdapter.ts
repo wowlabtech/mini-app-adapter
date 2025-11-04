@@ -213,8 +213,10 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         return this.isFeatureAvailable(qrScanner.open);
       case 'closeApp':
         return this.isFeatureAvailable(miniApp.close);
-      case 'backButtonVisibility':
+      case 'backButton':
         return backButton.isSupported();
+      case 'backButtonVisibility':
+        return backButton.hide.isSupported();
       case 'bindCssVariables':
         return true;
       case 'requestPhone': {

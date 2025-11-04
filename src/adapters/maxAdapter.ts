@@ -112,6 +112,8 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
         return typeof bridge?.openCodeReader === 'function';
       case 'closeApp':
         return typeof bridge?.close === 'function';
+      case 'backButton':
+        return Boolean(bridge?.BackButton?.onClick);
       case 'backButtonVisibility':
         return Boolean(bridge?.BackButton?.show && bridge.BackButton.hide);
       case 'requestPhone':

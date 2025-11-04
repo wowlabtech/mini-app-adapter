@@ -52,6 +52,7 @@ export type MiniAppCapability =
   | 'popup'
   | 'qrScanner'
   | 'closeApp'
+  | 'backButton'
   | 'backButtonVisibility'
   | 'bindCssVariables'
   | 'requestPhone';
@@ -192,5 +193,10 @@ export interface MiniAppAdapter {
    * Requests phone number from the host platform if supported.
    */
   requestPhone(): Promise<string | null>;
+
+  /**
+   * Subscribes to adapter environment updates (safe area, appearance etc.).
+   */
+  subscribe?(listener: () => void): () => void;
 
 }

@@ -1,6 +1,6 @@
 {
   "name": "tvm-app-adapter",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Cross-platform adapter toolkit for Telegram, VK, and MAX mini apps.",
   "type": "module",
   "private": false,

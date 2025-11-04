@@ -33,31 +33,37 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     this.unsubscribe = () => bridge.unsubscribe(handler);
 
     await bridge.send('VKWebAppInit');
-  const launchParams = await bridge.send('VKWebAppGetLaunchParams');
-  const queryParams = parseURLSearchParamsForGetLaunchParams(window.location.search);
 
-  this.launchParams = launchParams;
-  this.queryParams = queryParams as Record<string, unknown>;
+    const launchParams = await bridge.send('VKWebAppGetLaunchParams');
+    const queryParams = parseURLSearchParamsForGetLaunchParams(window.location.search);
+
+    this.launchParams = launchParams;
+    this.queryParams = queryParams as Record<string, unknown>;
 
     this.environment = this.composeEnvironment(launchParams, queryParams);
     this.applyAppearance(this.environment.appearance);
+    this.notifyEnvironmentChanged();
 
     this.ready = true;
   }
 
-  override async setColors(colors: { header?: string; background?: string; }): Promise<void> {
+  override async setColors(colors: { header?: string; background?: string }): Promise<void> {
     const { header, background } = colors;
 
     if (header || background) {
-      const statusBarStyle: AppearanceType = header
-        ? this.resolveStatusBarStyle(header)
-        : this.environment.appearance?.includes('dark') ? 'light' : 'dark';
+      const canApplyViewSettings = await this.isBridgeMethodSupported('VKWebAppSetViewSettings');
 
-      await bridge.send('VKWebAppSetViewSettings', {
-        status_bar_style: statusBarStyle,
-        ...(header ? { action_bar_color: header } : {}),
-        ...(background ? { navigation_bar_color: background } : {}),
-      });
+      if (canApplyViewSettings) {
+        const statusBarStyle: AppearanceType = header
+          ? this.resolveStatusBarStyle(header)
+          : this.environment.appearance?.includes('dark') ? 'light' : 'dark';
+
+        await bridge.send('VKWebAppSetViewSettings', {
+          status_bar_style: statusBarStyle,
+          ...(header ? { action_bar_color: header } : {}),
+          ...(background ? { navigation_bar_color: background } : {}),
+        });
+      }
     }
 
     await super.setColors(colors);
@@ -130,14 +136,16 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     const language = queryParams.vk_language ?? launchParams.vk_language;
     const platform = queryParams.vk_platform ?? launchParams.vk_platform;
     const appId = queryParams.vk_app_id ?? launchParams.vk_app_id;
-
+    const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+    const cssSafeArea = this.readCssSafeArea();
     return {
       platform: 'vk',
       sdkVersion: platform ? String(platform) : undefined,
       appVersion: typeof appId === 'number' ? `vk-app-${appId}` : undefined,
       languageCode: language ? String(language) : undefined,
-      appearance: undefined,
+      appearance: prefersDark ? 'dark' : 'light',
       isWebView: bridge.isWebView(),
+      safeArea: cssSafeArea,
     };
   }
 
@@ -150,13 +158,51 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     const config = data as ParentConfigData;
     this.environment.appearance = config.appearance ?? this.environment.appearance;
     this.applyAppearance(this.environment.appearance);
-
-    console.log('config :>> ', config);
+    this.notifyEnvironmentChanged();
 
     if ('insets' in config && config.insets) {
       const { top = 0, right = 0, bottom = 0, left = 0 } = config.insets;
-      this.environment.safeArea = { top, right, bottom, left };
+      const hasInsets = top !== 0 || right !== 0 || bottom !== 0 || left !== 0;
+      if (!hasInsets) {
+        return;
+      }
+
+      const prev = this.environment.safeArea;
+      const changed =
+        !prev ||
+        prev.top !== top ||
+        prev.right !== right ||
+        prev.bottom !== bottom ||
+        prev.left !== left;
+
+      if (changed) {
+        this.environment.safeArea = { top, right, bottom, left };
+        this.notifyEnvironmentChanged();
+      }
     }
+  }
+
+  private readCssSafeArea(): MiniAppEnvironmentInfo['safeArea'] | undefined {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const style = getComputedStyle(document.documentElement);
+    const parse = (prop: string): number => {
+      const value = parseFloat(style.getPropertyValue(prop));
+      return Number.isFinite(value) ? value : 0;
+    };
+
+    const top = parse('--safe-area-inset-top');
+    const right = parse('--safe-area-inset-right');
+    const bottom = parse('--safe-area-inset-bottom');
+    const left = parse('--safe-area-inset-left');
+
+    if (top || right || bottom || left) {
+      return { top, right, bottom, left };
+    }
+
+    return undefined;
   }
 
   private applyAppearance(appearance?: string): void {
@@ -193,6 +239,6 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       }
     }
 
-    return bridge.supports?.(method) ?? false;
+    return false;
   }
 }
