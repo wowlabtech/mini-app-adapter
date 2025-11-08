@@ -55,7 +55,8 @@ export type MiniAppCapability =
   | 'backButton'
   | 'backButtonVisibility'
   | 'bindCssVariables'
-  | 'requestPhone';
+  | 'requestPhone'
+  | 'notifications';
 
 export interface MiniAppPopupButton {
   id: string;
@@ -161,6 +162,11 @@ export interface MiniAppAdapter {
   getViewportInsets?(): MiniAppViewportInsets | undefined;
 
   /**
+   * Aggregates all known safe area insets into a single value.
+   */
+  computeSafeArea(): MiniAppEnvironmentInfo['safeArea'];
+
+  /**
    * Binds platform theme variables to CSS custom properties.
    */
   bindCssVariables(mapper?: (key: string) => string): void;
@@ -171,6 +177,12 @@ export interface MiniAppAdapter {
   vibrateImpact(style: ImpactHapticFeedbackStyle): void;
   vibrateNotification(type: NotificationHapticFeedbackType): void;
   vibrateSelection(): void;
+
+  /**
+   * Notifies when the host view goes to background/foreground (VK only).
+   */
+  onViewHide?(callback: () => void): () => void;
+  onViewRestore?(callback: () => void): () => void;
 
   /**
    * Enables or disables vertical swipe gestures if supported by the platform.
@@ -193,6 +205,12 @@ export interface MiniAppAdapter {
    * Requests phone number from the host platform if supported.
    */
   requestPhone(): Promise<string | null>;
+
+  /**
+   * Requests permission to send push notifications (platform-specific).
+   * Resolves with true if permission was granted.
+   */
+  requestNotificationsPermission?(): Promise<boolean>;
 
   /**
    * Subscribes to adapter environment updates (safe area, appearance etc.).

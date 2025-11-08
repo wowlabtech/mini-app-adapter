@@ -114,6 +114,36 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return undefined;
   }
 
+  computeSafeArea(): MiniAppEnvironmentInfo['safeArea'] {
+    const safeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+
+    const environmentSafeArea = this.environment.safeArea;
+    if (environmentSafeArea) {
+      safeArea.top += environmentSafeArea.top ?? 0;
+      safeArea.right += environmentSafeArea.right ?? 0;
+      safeArea.bottom += environmentSafeArea.bottom ?? 0;
+      safeArea.left += environmentSafeArea.left ?? 0;
+    }
+
+    const viewportInsets = this.getViewportInsets?.();
+    if (viewportInsets) {
+      safeArea.top += (viewportInsets.safeArea.top ?? 0) + (viewportInsets.contentSafeArea.top ?? 0);
+      safeArea.right += (viewportInsets.safeArea.right ?? 0) + (viewportInsets.contentSafeArea.right ?? 0);
+      safeArea.bottom += (viewportInsets.safeArea.bottom ?? 0) + (viewportInsets.contentSafeArea.bottom ?? 0);
+      safeArea.left += (viewportInsets.safeArea.left ?? 0) + (viewportInsets.contentSafeArea.left ?? 0);
+    }
+
+    const cssSafeArea = this.getCssSafeAreaFromDocument();
+    if (cssSafeArea) {
+      safeArea.top += cssSafeArea.top ?? 0;
+      safeArea.right += cssSafeArea.right ?? 0;
+      safeArea.bottom += cssSafeArea.bottom ?? 0;
+      safeArea.left += cssSafeArea.left ?? 0;
+    }
+
+    return safeArea;
+  }
+
   bindCssVariables(_mapper?: (key: string) => string): void {
     // No-op by default.
   }
@@ -130,6 +160,14 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     navigator.vibrate?.(5);
   }
 
+  onViewHide(_callback: () => void): () => void {
+    return () => {};
+  }
+
+  onViewRestore(_callback: () => void): () => void {
+    return () => {};
+  }
+
   async showPopup(options: MiniAppPopupOptions): Promise<string | null> {
     const message = [options.title, options.message].filter(Boolean).join('\n\n');
     window.alert(message);
@@ -143,6 +181,10 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   async requestPhone(): Promise<string | null> {
     return null;
+  }
+
+  async requestNotificationsPermission(): Promise<boolean> {
+    return false;
   }
 
   enableVerticalSwipes(): void {
@@ -161,5 +203,28 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
         console.warn('[tvm-app-adapter] environment listener failed:', error);
       }
     }
+  }
+
+  protected getCssSafeAreaFromDocument(): MiniAppEnvironmentInfo['safeArea'] | undefined {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const styles = getComputedStyle(document.documentElement);
+    const read = (prop: string) => {
+      const value = parseFloat(styles.getPropertyValue(prop));
+      return Number.isFinite(value) ? value : 0;
+    };
+
+    const top = read('--safe-area-inset-top');
+    const right = read('--safe-area-inset-right');
+    const bottom = read('--safe-area-inset-bottom');
+    const left = read('--safe-area-inset-left');
+
+    if (top || right || bottom || left) {
+      return { top, right, bottom, left };
+    }
+
+    return undefined;
   }
 }
