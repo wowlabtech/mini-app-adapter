@@ -30,7 +30,9 @@
     "@tma.js/sdk": "^3.0.8",
     "@tma.js/sdk-react": "^3.0.8",
     "@vkontakte/vk-bridge": "^2.10.0",
-    "eruda": "^3.4.3"
+    "eruda": "^3.4.3",
+    "html5-qrcode": "^2.3.8",
+    "jsqr": "^1.4.0"
   },
   "peerDependencies": {
     "react": ">=18",

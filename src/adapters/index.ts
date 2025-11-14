@@ -1,8 +1,10 @@
 import { MaxMiniAppAdapter } from '@/adapters/maxAdapter';
+import { ShellMiniAppAdapter } from '@/adapters/shellAdapter';
 import { TelegramMiniAppAdapter } from '@/adapters/telegramAdapter';
 import { VKMiniAppAdapter } from '@/adapters/vkAdapter';
 import { WebMiniAppAdapter } from '@/adapters/webAdapter';
 import type { MiniAppAdapter, MiniAppPlatform } from '@/types/miniApp';
+import { readShellPlatform } from '@/lib/shell';
 
 export function detectPlatform(): MiniAppPlatform {
   if (typeof window === 'undefined') {
@@ -21,6 +23,11 @@ export function detectPlatform(): MiniAppPlatform {
     searchParams.get(name) ?? hashParams.get(name);
 
   const hasParam = (...names: string[]): boolean => names.some((name) => getParam(name));
+
+  const shellPlatform = readShellPlatform();
+  if (shellPlatform) {
+    return shellPlatform;
+  }
 
   const userAgent = navigator.userAgent.toLowerCase();
 
@@ -50,6 +57,9 @@ export function detectPlatform(): MiniAppPlatform {
 
 export function createAdapter(platform: MiniAppPlatform = detectPlatform()): MiniAppAdapter {
   switch (platform) {
+    case 'shell_ios':
+    case 'shell_android':
+      return new ShellMiniAppAdapter(platform);
     case 'telegram':
       return new TelegramMiniAppAdapter();
     case 'vk':

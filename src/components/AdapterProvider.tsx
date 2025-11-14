@@ -25,7 +25,16 @@ export function AdapterProvider({ adapter, children }: AdapterProviderProps) {
 
   useEffect(() => {
     setActiveAdapter(proxiedAdapter);
-    return () => setActiveAdapter(null);
+    return () => {
+      setActiveAdapter(null);
+      if (typeof proxiedAdapter.destroy === 'function') {
+        try {
+          proxiedAdapter.destroy();
+        } catch (error) {
+          console.warn('[tvm-app-adapter] adapter destroy failed:', error);
+        }
+      }
+    };
   }, [proxiedAdapter]);
 
   return <AdapterContext.Provider value={proxiedAdapter}>{children}</AdapterContext.Provider>;

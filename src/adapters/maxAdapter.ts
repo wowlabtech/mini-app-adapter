@@ -51,7 +51,7 @@ interface MaxWebApp {
   close?: () => void;
   enableClosingConfirmation?: () => void;
   disableClosingConfirmation?: () => void;
-  openLink?: (url: string) => void;
+  openExternalLink?: (url: string) => void;
   openMaxLink?: (url: string) => void;
   downloadFile?: (url: string, fileName: string) => Promise<unknown>;
   shareContent?: (payload: { text: string; link?: string; requestId: string }) => Promise<unknown>;
@@ -146,7 +146,7 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
     const disposer = bridge.BackButton.onClick(wrapped);
     bridge.BackButton.show?.();
 
-    const cleanup = () => {
+    const removeFromBag = this.registerDisposable(() => {
       if (typeof disposer === 'function') {
         disposer();
       } else {
@@ -156,10 +156,10 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
       if (!this.backHandlers.size) {
         bridge.BackButton?.hide?.();
       }
-    };
+    });
 
-    this.backHandlers.set(callback, cleanup);
-    return cleanup;
+    this.backHandlers.set(callback, removeFromBag);
+    return removeFromBag;
   }
 
   override setBackButtonVisibility(visible: boolean): void {
@@ -170,13 +170,13 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
     visible ? bridge.BackButton.show?.() : bridge.BackButton.hide?.();
   }
 
-  override async openLink(url: string): Promise<void> {
+  override async openExternalLink(url: string): Promise<void> {
     const bridge = getMaxBridge();
-    if (bridge?.openLink) {
-      bridge.openLink(url);
+    if (bridge?.openExternalLink) {
+      bridge.openExternalLink(url);
       return;
     }
-    await super.openLink(url);
+    await super.openExternalLink(url);
   }
 
   override async closeApp(): Promise<void> {
@@ -256,6 +256,20 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
     return super.showPopup(options);
   }
 
+  override async downloadFile(url: string, filename: string): Promise<void> {
+    const bridge = getMaxBridge();
+    if (bridge?.downloadFile) {
+      try {
+        await bridge.downloadFile(url, filename);
+        return;
+      } catch (error) {
+        console.warn('[mini-app-template] MAX downloadFile failed:', error);
+      }
+    }
+
+    await super.downloadFile(url, filename);
+  }
+
   private async requestPhoneViaEvent(): Promise<string | null> {
     if (typeof window === 'undefined') {
       return null;
@@ -317,5 +331,10 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
     }
 
     return null;
+  }
+
+  protected override onDestroy(): void {
+    this.backHandlers.clear();
+    super.onDestroy();
   }
 }

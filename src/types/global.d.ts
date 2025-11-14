@@ -15,7 +15,7 @@ interface TelegramWebApp {
   ready(): void;
   setHeaderColor(color: string): void;
   setBackgroundColor(color: string): void;
-  openLink(url: string, options?: { try_instant_view?: boolean }): void;
+  openExternalLink(url: string, options?: { try_instant_view?: boolean }): void;
   enableClosingConfirmation?(): void;
   disableClosingConfirmation?(): void;
   BackButton: TelegramBackButton;
@@ -54,7 +54,7 @@ interface MaxWebApp {
   close?(): void;
   enableClosingConfirmation?(): void;
   disableClosingConfirmation?(): void;
-  openLink?(url: string): void;
+  openExternalLink?(url: string): void;
   openMaxLink?(url: string): void;
   downloadFile?(url: string, fileName: string): Promise<unknown>;
   shareContent?(params: { text: string; link?: string; requestId: string }): Promise<unknown>;
@@ -67,6 +67,12 @@ interface MaxWebApp {
 interface Window {
   Telegram?: TelegramSDK;
   WebApp?: MaxWebApp;
+  NativeBridge?: {
+    postMessage(message: {
+      type: 'storeToken' | 'requestPushPermission' | 'openNativeQR';
+      payload?: Record<string, unknown>;
+    }): void;
+  };
 }
 
 declare module 'eruda' {

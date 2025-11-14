@@ -2,6 +2,8 @@ import bridge, {
   AnyRequestMethodName,
   parseURLSearchParamsForGetLaunchParams,
   
+  ShowStoryBoxOptions,
+  
   TapticNotificationType,
   
   TapticVibrationPowerType,
@@ -18,50 +20,30 @@ import type {
   MiniAppEnvironmentInfo,
   MiniAppInitOptions,
   MiniAppQrScanOptions,
+  MiniAppShareStoryOptions,
 } from '@/types/miniApp';
+import { isBridgeMethodSupported, type BridgeSupportsAsync } from '@/lib/bridge';
+import { computeCombinedSafeArea, createSafeAreaWatcher, readCssSafeArea } from '@/lib/safeArea';
 
 export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   private configSafeArea?: MiniAppEnvironmentInfo['safeArea'];
   private stopViewportTracking?: () => void;
-
-  private readonly handleViewportSafeArea = () => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const combinedSafeArea = this.computeSafeArea();
-    if (!combinedSafeArea) {
-      return;
-    }
-    const prevSafeArea = this.environment.safeArea;
-
-    if (!prevSafeArea ||
-      prevSafeArea.top !== combinedSafeArea.top ||
-      prevSafeArea.right !== combinedSafeArea.right ||
-      prevSafeArea.bottom !== combinedSafeArea.bottom ||
-      prevSafeArea.left !== combinedSafeArea.left) {
-      this.environment.safeArea = combinedSafeArea;
-      this.notifyEnvironmentChanged();
-    }
-  };
+  private readonly supportsAsync?: BridgeSupportsAsync<AnyRequestMethodName> = typeof bridge.supportsAsync === 'function'
+    ? bridge.supportsAsync.bind(bridge)
+    : undefined;
 
   override computeSafeArea(): MiniAppEnvironmentInfo['safeArea'] {
-    const baseSafeArea = this.computeBaseSafeArea() ?? {
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-    };
-
-    const safeArea = { ...baseSafeArea };
+    const baseSafeArea = this.computeBaseSafeArea();
     const overlayInsets = this.resolveOverlayInsets();
 
     if (overlayInsets) {
-      safeArea.top = Math.max(safeArea.top, overlayInsets.top);
-      safeArea.right = Math.max(safeArea.right, overlayInsets.right);
+      return computeCombinedSafeArea({
+        environment: baseSafeArea,
+        minimum: overlayInsets,
+      });
     }
 
-    return safeArea;
+    return baseSafeArea;
   }
   private unsubscribe?: () => void;
   private launchParams?: GetLaunchParamsResponse;
@@ -80,7 +62,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
 
     const handler: VKBridgeSubscribeHandler = (event) => this.handleBridgeEvent(event);
     bridge.subscribe(handler);
-    this.unsubscribe = () => bridge.unsubscribe(handler);
+    this.unsubscribe = this.registerDisposable(() => bridge.unsubscribe(handler));
 
     let initialConfig: ParentConfigData | undefined;
     try {
@@ -128,19 +110,19 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async vibrateImpact(style: TapticVibrationPowerType): Promise<void> {
-    if (await this.isBridgeMethodSupported('VKWebAppTapticImpactOccurred')) {
+    if (await this.supportsBridgeMethod('VKWebAppTapticImpactOccurred')) {
       bridge.send('VKWebAppTapticImpactOccurred', { style });
     }
   }
 
   override async vibrateNotification(type: TapticNotificationType): Promise<void> {
-    if (await this.isBridgeMethodSupported('VKWebAppTapticNotificationOccurred')) {
+    if (await this.supportsBridgeMethod('VKWebAppTapticNotificationOccurred')) {
       bridge.send('VKWebAppTapticNotificationOccurred', { type });
     }
   }
 
   override async vibrateSelection(): Promise<void> {
-    if (await this.isBridgeMethodSupported('VKWebAppTapticSelectionChanged')) {
+    if (await this.supportsBridgeMethod('VKWebAppTapticSelectionChanged')) {
       bridge.send('VKWebAppTapticSelectionChanged');
     }
   }
@@ -149,7 +131,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     const { header, background } = colors;
 
     if (header || background) {
-      const canApplyViewSettings = await this.isBridgeMethodSupported('VKWebAppSetViewSettings');
+      const canApplyViewSettings = await this.supportsBridgeMethod('VKWebAppSetViewSettings');
 
       if (canApplyViewSettings) {
         const statusBarStyle: AppearanceType = header
@@ -188,14 +170,14 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   override async supports(capability: MiniAppCapability): Promise<boolean> {
     if (capability === 'requestPhone') {
       const [supportsPhoneNumber, supportsPersonalCard] = await Promise.all([
-        this.isBridgeMethodSupported('VKWebAppGetPhoneNumber'),
-        this.isBridgeMethodSupported('VKWebAppGetPersonalCard'),
+        this.supportsBridgeMethod('VKWebAppGetPhoneNumber'),
+        this.supportsBridgeMethod('VKWebAppGetPersonalCard'),
       ]);
       return supportsPhoneNumber || supportsPersonalCard;
     }
 
     if (capability === 'notifications') {
-      return this.isBridgeMethodSupported('VKWebAppAllowNotifications');
+      return this.supportsBridgeMethod('VKWebAppAllowNotifications');
     }
 
     return await super.supports(capability);
@@ -203,8 +185,8 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
 
   override async requestPhone(): Promise<string | null> {
     const [supportsPhoneNumber, supportsPersonalCard] = await Promise.all([
-      this.isBridgeMethodSupported('VKWebAppGetPhoneNumber'),
-      this.isBridgeMethodSupported('VKWebAppGetPersonalCard'),
+      this.supportsBridgeMethod('VKWebAppGetPhoneNumber'),
+      this.supportsBridgeMethod('VKWebAppGetPersonalCard'),
     ]);
     if (!supportsPhoneNumber && !supportsPersonalCard) {
       return super.requestPhone();
@@ -227,7 +209,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async requestNotificationsPermission(): Promise<boolean> {
-    const supported = await this.isBridgeMethodSupported('VKWebAppAllowNotifications');
+    const supported = await this.supportsBridgeMethod('VKWebAppAllowNotifications');
     if (!supported) {
       return super.requestNotificationsPermission();
     }
@@ -245,7 +227,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async scanQRCode(options?: MiniAppQrScanOptions): Promise<string | null> {
-    const supportsQrScanner = await this.isBridgeMethodSupported('VKWebAppOpenCodeReader');
+    const supportsQrScanner = await this.supportsBridgeMethod('VKWebAppOpenCodeReader');
     
     if (!supportsQrScanner) {
       return super.scanQRCode(options);
@@ -265,15 +247,6 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     return result;
   }
 
-  dispose(): void {
-    this.unsubscribe?.();
-    this.unsubscribe = undefined;
-    this.viewHideListeners.clear();
-    this.viewRestoreListeners.clear();
-    this.stopViewportTracking?.();
-    this.stopViewportTracking = undefined;
-  }
-
   override onViewHide(callback: () => void): () => void {
     this.viewHideListeners.add(callback);
     return () => {
@@ -286,6 +259,33 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     return () => {
       this.viewRestoreListeners.delete(callback);
     };
+  }
+
+  override async shareStory(mediaUrl: string, _options?: MiniAppShareStoryOptions): Promise<void> {
+    const bridgeOptions: ShowStoryBoxOptions = {
+      background_type: 'image',
+      url: mediaUrl,
+    };
+    await bridge.send('VKWebAppShowStoryBox', bridgeOptions)
+  }
+
+  override async downloadFile(url: string, filename: string): Promise<void> {
+    const supported = await this.supportsBridgeMethod('VKWebAppDownloadFile');
+    if (!supported) {
+      await super.downloadFile(url, filename);
+      return;
+    }
+
+    try {
+      const response = await bridge.send('VKWebAppDownloadFile', { url, filename });
+      const result = (response as { result?: boolean } | undefined)?.result;
+      if (result === false) {
+        throw new Error('VKWebAppDownloadFile returned result=false');
+      }
+    } catch (error) {
+      console.warn('[tvm-app-adapter] VK downloadFile failed:', error);
+      await super.downloadFile(url, filename);
+    }
   }
 
   private composeEnvironment(
@@ -415,19 +415,6 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     return luminance > 0.6 ? 'dark' : 'light';
   }
 
-  private async isBridgeMethodSupported(method: AnyRequestMethodName): Promise<boolean> {
-    if (typeof bridge.supportsAsync === 'function') {
-      try {
-        return await bridge.supportsAsync(method);
-      } catch (error) {
-        console.warn('[tvm-app-adapter] VK bridge.supportsAsync failed:', error);
-        return false;
-      }
-    }
-
-    return false;
-  }
-
   private normalizeAppearance(
     rawAppearance?: string | null,
     scheme?: string | null,
@@ -480,33 +467,27 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   private computeBaseSafeArea(): MiniAppEnvironmentInfo['safeArea'] {
-    const previousSafeArea = this.environment.safeArea;
-    this.environment.safeArea = this.configSafeArea;
-
-    const result = super.computeSafeArea() ?? {
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-    };
-
-    this.environment.safeArea = previousSafeArea;
-    return result;
+    return computeCombinedSafeArea({
+      environment: this.configSafeArea,
+      viewport: this.getViewportInsets?.(),
+      css: readCssSafeArea(),
+    });
   }
 
   private startViewportTracking(): void {
-    if (typeof window === 'undefined') {
-      return;
+    this.stopViewportTracking?.();
+
+    const dispose = createSafeAreaWatcher({
+      getSafeArea: () => this.computeSafeArea(),
+      onChange: (next) => {
+        this.environment.safeArea = next;
+        this.notifyEnvironmentChanged();
+      },
+    });
+
+    if (dispose) {
+      this.stopViewportTracking = this.registerDisposable(dispose);
     }
-
-    const handler = this.handleViewportSafeArea;
-    window.addEventListener('resize', handler);
-    window.addEventListener('orientationchange', handler);
-
-    this.stopViewportTracking = () => {
-      window.removeEventListener('resize', handler);
-      window.removeEventListener('orientationchange', handler);
-    };
   }
 
   private resolveOverlayInsets(): { top: number; right: number } | undefined {
@@ -583,5 +564,19 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     }
 
     return undefined;
+  }
+
+  private supportsBridgeMethod(method: AnyRequestMethodName): Promise<boolean> {
+    return isBridgeMethodSupported(method, this.supportsAsync);
+  }
+
+  protected override onDestroy(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    this.stopViewportTracking?.();
+    this.stopViewportTracking = undefined;
+    this.viewHideListeners.clear();
+    this.viewRestoreListeners.clear();
+    super.onDestroy();
   }
 }

@@ -17,6 +17,10 @@ export {
 } from '@/adapters/maxAdapter';
 
 export {
+  ShellMiniAppAdapter,
+} from '@/adapters/shellAdapter';
+
+export {
   TelegramMiniAppAdapter,
 } from '@/adapters/telegramAdapter';
 
@@ -39,5 +43,24 @@ export {
 } from '@/components/AdapterProvider';
 
 export {
+  useAdapterTheme,
+} from '@/hooks/useAdapterTheme';
+
+export {
+  useSafeArea,
+} from '@/hooks/useSafeArea';
+
+export {
   getActiveAdapter,
 } from '@/registry';
+
+export {
+  shell,
+  createShellAPI,
+  isShell,
+  isShellIOS,
+  isShellAndroid,
+  readShellPlatform,
+  requestShellPushPermission,
+  storeShellToken,
+} from '@/lib/shell';

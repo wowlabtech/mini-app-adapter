@@ -4,6 +4,7 @@ import type {
 } from '@tma.js/bridge';
 
 import {
+  MiniAppShareStoryOptions,
   type MiniAppAdapter,
   type MiniAppCapability,
   type MiniAppEnvironmentInfo,
@@ -13,6 +14,10 @@ import {
   type MiniAppQrScanOptions,
   type MiniAppViewportInsets,
 } from '@/types/miniApp';
+import { DisposableBag, type Disposable } from '@/lib/disposables';
+import { triggerFileDownload } from '@/lib/download';
+import { computeCombinedSafeArea, readCssSafeArea } from '@/lib/safeArea';
+import { createShellAPI, type ShellAPI } from '@/lib/shell';
 
 export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
   protected ready = false;
@@ -21,11 +26,29 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   private listeners = new Set<() => void>();
 
+  private readonly disposables = new DisposableBag();
+
+  readonly shell: ShellAPI;
+
   protected constructor(platform: MiniAppPlatform, environment?: Partial<MiniAppEnvironmentInfo>) {
+    this.shell = createShellAPI(platform);
     this.environment = {
       platform,
       ...environment,
     };
+
+    if (typeof window !== 'undefined') {
+      const resizeHandler = () => this.notifyEnvironmentChanged();
+      window.addEventListener('resize', resizeHandler);
+      this.registerDisposable(() => window.removeEventListener('resize', resizeHandler));
+
+      if (platform !== 'web') {
+        const cleanup = this.applyScrollGuards();
+        if (cleanup) {
+          this.registerDisposable(cleanup);
+        }
+      }
+    }
   }
 
   supports(_capability: MiniAppCapability): boolean | Promise<boolean> {
@@ -46,6 +69,16 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   getEnvironment(): MiniAppEnvironmentInfo {
     return { ...this.environment };
+  }
+
+  destroy(): void {
+    try {
+      this.onDestroy();
+    } finally {
+      this.disposables.disposeAll();
+      this.listeners.clear();
+      this.ready = false;
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -73,8 +106,12 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return () => window.removeEventListener('popstate', handler);
   }
 
-  async openLink(url: string): Promise<void> {
+  async openExternalLink(url: string): Promise<void> {
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+  
+  async openInternalLink(_url: string): Promise<void> {
+
   }
 
   async closeApp(): Promise<void> {
@@ -114,34 +151,49 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return undefined;
   }
 
+  shareMessage(_message: string): Promise<void> {
+    return Promise.resolve();
+  }
+
+  shareUrl(_url: string, _text: string): void {
+    // No-op by default.
+  }
+
+  async downloadFile(url: string, filename: string): Promise<void> {
+    await triggerFileDownload(url, filename);
+  }
+
+  shareStory(_mediaUrl: string, _options?: MiniAppShareStoryOptions): Promise<void> {
+    return Promise.resolve();
+  }
+
+  copyTextToClipboard(text: string): Promise<void> {
+    return navigator.clipboard.writeText(text).catch(() => {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';  // Prevent scrolling to bottom of page in MS Edge.
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } catch {
+        // Ignore errors
+      }
+      document.body.removeChild(textarea);
+    });
+  }
+
   computeSafeArea(): MiniAppEnvironmentInfo['safeArea'] {
-    const safeArea = { top: 0, right: 0, bottom: 0, left: 0 };
-
-    const environmentSafeArea = this.environment.safeArea;
-    if (environmentSafeArea) {
-      safeArea.top += environmentSafeArea.top ?? 0;
-      safeArea.right += environmentSafeArea.right ?? 0;
-      safeArea.bottom += environmentSafeArea.bottom ?? 0;
-      safeArea.left += environmentSafeArea.left ?? 0;
-    }
-
     const viewportInsets = this.getViewportInsets?.();
-    if (viewportInsets) {
-      safeArea.top += (viewportInsets.safeArea.top ?? 0) + (viewportInsets.contentSafeArea.top ?? 0);
-      safeArea.right += (viewportInsets.safeArea.right ?? 0) + (viewportInsets.contentSafeArea.right ?? 0);
-      safeArea.bottom += (viewportInsets.safeArea.bottom ?? 0) + (viewportInsets.contentSafeArea.bottom ?? 0);
-      safeArea.left += (viewportInsets.safeArea.left ?? 0) + (viewportInsets.contentSafeArea.left ?? 0);
-    }
+    const cssSafeArea = readCssSafeArea();
 
-    const cssSafeArea = this.getCssSafeAreaFromDocument();
-    if (cssSafeArea) {
-      safeArea.top += cssSafeArea.top ?? 0;
-      safeArea.right += cssSafeArea.right ?? 0;
-      safeArea.bottom += cssSafeArea.bottom ?? 0;
-      safeArea.left += cssSafeArea.left ?? 0;
-    }
-
-    return safeArea;
+    return computeCombinedSafeArea({
+      environment: this.environment.safeArea,
+      viewport: viewportInsets,
+      css: cssSafeArea,
+    });
   }
 
   bindCssVariables(_mapper?: (key: string) => string): void {
@@ -205,26 +257,37 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     }
   }
 
-  protected getCssSafeAreaFromDocument(): MiniAppEnvironmentInfo['safeArea'] | undefined {
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
+  protected onDestroy(): void {
+    // Subclasses can override to run synchronous teardown before shared disposables flush.
+  }
+
+  protected registerDisposable(disposable: Disposable): () => void {
+    return this.disposables.add(disposable);
+  }
+
+  private applyScrollGuards(): (() => void) | undefined {
+    if (typeof document === 'undefined') {
       return undefined;
     }
 
-    const styles = getComputedStyle(document.documentElement);
-    const read = (prop: string) => {
-      const value = parseFloat(styles.getPropertyValue(prop));
-      return Number.isFinite(value) ? value : 0;
-    };
-
-    const top = read('--safe-area-inset-top');
-    const right = read('--safe-area-inset-right');
-    const bottom = read('--safe-area-inset-bottom');
-    const left = read('--safe-area-inset-left');
-
-    if (top || right || bottom || left) {
-      return { top, right, bottom, left };
+    const html = document.documentElement;
+    const body = document.body;
+    if (!html || !body) {
+      return undefined;
     }
 
-    return undefined;
+    const prevHtmlOverscroll = html.style.overscrollBehaviorY;
+    const prevBodyOverscroll = body.style.overscrollBehaviorY;
+    const prevBodyTouchAction = body.style.touchAction;
+
+    html.style.overscrollBehaviorY = 'none';
+    body.style.overscrollBehaviorY = 'none';
+    body.style.touchAction = 'manipulation';
+
+    return () => {
+      html.style.overscrollBehaviorY = prevHtmlOverscroll;
+      body.style.overscrollBehaviorY = prevBodyOverscroll;
+      body.style.touchAction = prevBodyTouchAction;
+    };
   }
 }

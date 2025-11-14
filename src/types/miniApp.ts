@@ -3,7 +3,15 @@ import type {
   NotificationHapticFeedbackType,
 } from '@tma.js/bridge';
 
-export type MiniAppPlatform = 'telegram' | 'vk' | 'max' | 'web';
+import type { ShellAPI } from '@/lib/shell';
+
+export type MiniAppPlatform =
+  | 'telegram'
+  | 'vk'
+  | 'max'
+  | 'web'
+  | 'shell_ios'
+  | 'shell_android';
 
 export interface MiniAppEnvironmentInfo {
   platform: MiniAppPlatform;
@@ -12,6 +20,9 @@ export interface MiniAppEnvironmentInfo {
   languageCode?: string;
   appearance?: string;
   isWebView?: boolean;
+  hasNativeQR?: boolean;
+  hasPush?: boolean;
+  hasWidgets?: boolean;
   safeArea?: {
     top: number;
     right: number;
@@ -47,6 +58,14 @@ export interface MiniAppInitOptions {
   mockForMacOS?: boolean;
 }
 
+export interface MiniAppShareStoryOptions {
+  text?: string;
+  widgetLink?: {
+    url: string;
+    name?: string;
+  };
+}
+
 export type MiniAppCapability =
   | 'haptics'
   | 'popup'
@@ -79,6 +98,7 @@ export interface MiniAppQrScanOptions {
 
 export interface MiniAppAdapter {
   readonly platform: MiniAppPlatform;
+  readonly shell: ShellAPI;
 
   /**
    * Quick capability check before calling platform specific APIs.
@@ -101,6 +121,11 @@ export interface MiniAppAdapter {
   getEnvironment(): MiniAppEnvironmentInfo;
 
   /**
+   * Tears down adapter listeners/resources when it is no longer used.
+   */
+  destroy?(): void;
+
+  /**
    * Applies navigation / background colors if supported by the host platform.
    */
   setColors(colors: { header?: string; background?: string; footer?: string }): Promise<void>;
@@ -114,7 +139,12 @@ export interface MiniAppAdapter {
   /**
    * Opens external link using platform capabilities.
    */
-  openLink(url: string): Promise<void>;
+  openExternalLink(url: string): Promise<void>;
+
+  /**
+   * Opens internal link using platform capabilities.
+   */
+  openInternalLink(url: string): Promise<void>;
 
   /**
    * Closes the host mini app if supported.
@@ -217,4 +247,28 @@ export interface MiniAppAdapter {
    */
   subscribe?(listener: () => void): () => void;
 
+  /**
+   * Shares a message using platform-specific capabilities.
+   */
+  shareMessage?(message: string): Promise<void>;
+
+  /**
+   * Shares a URL using platform-specific capabilities.
+   */
+  shareUrl?(url: string, text: string): void;
+
+  /**
+   * Copies text to the clipboard if supported by the platform.
+   */
+  copyTextToClipboard?(text: string): Promise<void>;
+
+  /**
+   * Downloads a file using platform-specific capabilities.
+   */
+  downloadFile?(url: string, filename: string): Promise<void>;
+
+  /**
+   * Shares a story using platform-specific capabilities.
+   */
+  shareStory?(mediaUrl: string, options?: MiniAppShareStoryOptions): Promise<void>;
 }

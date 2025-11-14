@@ -29,6 +29,10 @@ import {
   requestPhoneAccess,
   swipeBehavior,
   viewport as rawViewport,
+  shareURL as shareURLSdk,
+  copyTextToClipboard as copyTextToClipboardSdk,
+  downloadFile as downloadFileSdk,
+  shareStory as shareStorySdk,
 } from '@tma.js/sdk';
 
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
@@ -38,18 +42,21 @@ import type {
   MiniAppInitOptions,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
+  MiniAppShareStoryOptions,
   MiniAppViewportInsets,
 } from '@/types/miniApp';
+import { ensureFeature, isFeatureAvailable } from '@/lib/features';
+import { bindViewportCssVars, ensureViewportMounted } from '@/lib/viewport';
 export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   private readonly backHandlers = new Map<() => void, () => void>();
   private cssVariablesBound = false;
   private readonly appearanceListeners = new Set<
     (appearance: 'dark' | 'light' | undefined) => void
   >();
-  private disposeAppearanceWatcher?: () => void;
+  private appearanceWatcherDispose?: () => void;
   private readonly viewHideListeners = new Set<() => void>();
   private readonly viewRestoreListeners = new Set<() => void>();
-  private disposeActiveWatcher?: () => void;
+  private activeWatcherDispose?: () => void;
 
   constructor() {
     super('telegram');
@@ -146,7 +153,10 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     if (colors.header) {
       if (miniApp.setHeaderColor.isAvailable()) {
         const headerColor = miniApp.setHeaderColor.supports?.('rgb') ? colors.header : 'bg_color';
-        miniApp.setHeaderColor(headerColor);
+        const { ok } = ensureFeature(miniApp.setHeaderColor, headerColor);
+        if (!ok) {
+          fallback.header = colors.header;
+        }
       } else {
         fallback.header = colors.header;
       }
@@ -154,7 +164,10 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
     if (colors.background) {
       if (miniApp.setBgColor.isAvailable()) {
-        miniApp.setBgColor(colors.background);
+        const { ok } = ensureFeature(miniApp.setBgColor, colors.background);
+        if (!ok) {
+          fallback.background = colors.background;
+        }
       } else {
         fallback.background = colors.background;
       }
@@ -162,7 +175,10 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
     if (colors.footer) {
       if (miniApp.setBgColor.isAvailable()) {
-        miniApp.setBottomBarColorFp(colors.footer);
+        const { ok } = ensureFeature(miniApp.setBottomBarColorFp, colors.footer);
+        if (!ok) {
+          fallback.footer = colors.footer;
+        }
       } else {
         fallback.footer = colors.footer;
       }
@@ -173,34 +189,43 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
+  override copyTextToClipboard(text: string): Promise<void> {
+    return copyTextToClipboardSdk(text);
+  }
+
   override onBackButton(callback: () => void): () => void {
     if (!backButton.isSupported()) {
       return super.onBackButton(callback);
     }
 
     const dispose = backButton.onClick(() => callback());
-    this.backHandlers.set(callback, dispose);
 
-    return () => {
-      const handler = this.backHandlers.get(callback);
-      if (handler) {
-        handler();
-        this.backHandlers.delete(callback);
+    const removeFromBag = this.registerDisposable(() => {
+      if (typeof dispose === 'function') {
+        dispose();
       }
+      this.backHandlers.delete(callback);
       if (!this.backHandlers.size) {
         backButton.hide();
       }
-    };
+    });
+
+    this.backHandlers.set(callback, removeFromBag);
+    return removeFromBag;
   }
 
-  override async openLink(url: string): Promise<void> {
+  override async openExternalLink(url: string): Promise<void> {
     try {
       openLink(url, { tryInstantView: true });
       return;
     } catch {
       // Fall back to default behaviour if Telegram specific API is not available.
     }
-    await super.openLink(url);
+    await super.openExternalLink(url);
+  }
+
+  override async openInternalLink(url: string): Promise<void> {
+    postEvent('web_app_open_tg_link', { path_full: url });
   }
 
   enableDebug(state: boolean): void {
@@ -214,13 +239,13 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   override supports(capability: MiniAppCapability): boolean {
     switch (capability) {
       case 'haptics':
-        return this.isFeatureAvailable(hapticFeedback.selectionChanged);
+        return isFeatureAvailable(hapticFeedback.selectionChanged);
       case 'popup':
-        return this.isFeatureAvailable(popup.show);
+        return isFeatureAvailable(popup.show);
       case 'qrScanner':
-        return this.isFeatureAvailable(qrScanner.open);
+        return isFeatureAvailable(qrScanner.open);
       case 'closeApp':
-        return this.isFeatureAvailable(miniApp.close);
+        return isFeatureAvailable(miniApp.close);
       case 'backButton':
         return backButton.isSupported();
       case 'backButtonVisibility':
@@ -228,7 +253,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       case 'bindCssVariables':
         return true;
       case 'requestPhone': {
-        return Boolean(this.isFeatureAvailable(requestPhoneAccess) || this.isFeatureAvailable(requestContact));
+        return Boolean(isFeatureAvailable(requestPhoneAccess) || isFeatureAvailable(requestContact));
       }
       default:
         return false;
@@ -271,11 +296,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async showPopup(options: MiniAppPopupOptions): Promise<string | null> {
-    if (!this.supports('popup')) {
-      return super.showPopup(options);
-    }
-
-    const response = await popup.show({
+    const popupResult = ensureFeature(popup.show, {
       title: options.title,
       message: options.message,
       buttons: options.buttons?.map((button) => ({
@@ -285,34 +306,42 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       })),
     });
 
+    if (!popupResult.ok) {
+      return super.showPopup(options);
+    }
+
+    const response = await popupResult.value;
     return response ?? null;
   }
 
   override async scanQRCode(options?: MiniAppQrScanOptions): Promise<string | null> {
-    if (!this.supports('qrScanner')) {
-      return super.scanQRCode(options);
-    }
-
     let result: string | null = null;
     const closeOnCapture = options?.closeOnCapture ?? true;
 
-    await qrScanner.open({
+    const qrScannerResult = ensureFeature(qrScanner.open, {
       onCaptured: (qr) => {
         result = qr;
-        if (closeOnCapture && this.isFeatureAvailable(qrScanner.close)) {
-          qrScanner.close();
+        if (closeOnCapture) {
+          void ensureFeature(qrScanner.close);
         }
       },
     });
+
+    if (!qrScannerResult.ok) {
+      return super.scanQRCode(options);
+    }
+
+    await qrScannerResult.value;
 
     return result;
   }
 
   override async closeApp(): Promise<void> {
-    if (this.supports('closeApp')) {
-      miniApp.close();
+    const closeResult = ensureFeature(miniApp.close);
+    if (closeResult.ok) {
       return;
     }
+
     await super.closeApp();
   }
 
@@ -437,21 +466,47 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     };
   }
 
+  override shareUrl(url: string, text?: string): void {
+    return shareURLSdk(url ,text);
+  }
+
+  override async downloadFile(url: string, filename: string): Promise<void> {
+    const result = ensureFeature(downloadFileSdk, url, filename);
+    if (result.ok) {
+      try {
+        await result.value;
+        return;
+      } catch (error) {
+        console.warn('[tvm-app-adapter] Telegram downloadFile failed:', error);
+      }
+    }
+
+    await super.downloadFile(url, filename);
+  }
+
+  override async shareStory(mediaUrl: string, options?: MiniAppShareStoryOptions): Promise<void> {
+    shareStorySdk(mediaUrl, options);
+  }
+
   override async requestPhone(): Promise<string | null> {
-    if (!this.isFeatureAvailable(requestContact)) {
+    const contactFeature = ensureFeature(requestContact);
+    if (!contactFeature.ok) {
       return super.requestPhone();
     }
 
-    if (requestPhoneAccess && this.isFeatureAvailable(requestPhoneAccess)) {
-      try {
-        await requestPhoneAccess();
-      } catch (error) {
-        console.warn('[tvm-app-adapter] Telegram requestPhone access failed:', error);
+    if (requestPhoneAccess) {
+      const accessFeature = ensureFeature(requestPhoneAccess);
+      if (accessFeature.ok) {
+        try {
+          await accessFeature.value;
+        } catch (error) {
+          console.warn('[tvm-app-adapter] Telegram requestPhone access failed:', error);
+        }
       }
     }
 
     try {
-      const result = await requestContact();
+      const result = await contactFeature.value;
       if (!result || typeof result !== 'object') {
         return null;
       }
@@ -479,23 +534,16 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  private isFeatureAvailable(fn: unknown): boolean {
-    if (typeof fn !== 'function') {
-      return false;
-    }
-    const candidate = fn as { isAvailable?: () => boolean };
-    return typeof candidate.isAvailable === 'function' ? candidate.isAvailable() : true;
-  }
-
   private setupAppearanceWatcher(): void {
-    this.disposeAppearanceWatcher?.();
+    this.appearanceWatcherDispose?.();
 
     if (typeof themeParams.isDark?.sub === 'function') {
-      this.disposeAppearanceWatcher = themeParams.isDark.sub(() => {
+      const disposer = themeParams.isDark.sub(() => {
         const appearance = themeParams.isDark() ? 'dark' : 'light';
         this.environment.appearance = appearance;
         this.notifyAppearance(appearance);
       });
+      this.appearanceWatcherDispose = this.registerDisposable(disposer);
     }
   }
 
@@ -506,7 +554,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   private setupActiveWatcher(): void {
-    this.disposeActiveWatcher?.();
+    this.activeWatcherDispose?.();
 
     const activeSignal = miniApp.isActive as typeof miniApp.isActive & {
       sub?: (callback: () => void) => () => void;
@@ -526,7 +574,8 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     };
 
     if (typeof activeSignal?.sub === 'function') {
-      this.disposeActiveWatcher = activeSignal.sub(() => invoke());
+      const disposer = activeSignal.sub(() => invoke());
+      this.activeWatcherDispose = this.registerDisposable(disposer);
       invoke();
       return;
     }
@@ -540,50 +589,23 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
   private async prepareViewport(): Promise<void> {
     try {
-      await this.ensureViewportMounted();
-      if (viewport.bindCssVars && typeof viewport.bindCssVars === 'function') {
-        viewport.bindCssVars();
-      }
+      await bindViewportCssVars({
+        ...this.getViewportMountOptions(),
+        bindCssVars: typeof viewport.bindCssVars === 'function' ? viewport.bindCssVars : undefined,
+      });
     } catch (error) {
       console.warn('[tvm-app-adapter] prepareViewport failed:', error);
     }
   }
 
-  private async ensureViewportMounted(): Promise<void> {
-    try {
-      const sdkViewport = rawViewport as typeof rawViewport & {
-        isSupported?: () => boolean;
-        isMounted?: () => boolean;
-        mount?: () => void;
-      };
-
-      if (typeof sdkViewport.isSupported === 'function' && sdkViewport.isSupported()) {
-        if (typeof sdkViewport.isMounted === 'function' && !sdkViewport.isMounted()) {
-          sdkViewport.mount?.();
-        }
-        return;
-      }
-
-      if (viewport.mount.isAvailable()) {
-        await viewport.mount();
-      }
-    } catch (error) {
-      console.warn('[tvm-app-adapter] ensureViewportMounted failed:', error);
-      throw error;
-    }
-  }
-
   private async requestFullscreenInternal(): Promise<void> {
     try {
-      await this.ensureViewportMounted();
+      const viewportOptions = this.getViewportMountOptions();
+      await ensureViewportMounted(viewportOptions);
 
-      const sdkViewport = rawViewport as typeof rawViewport & {
-        requestFullscreen?: () => Promise<void> | void;
-      };
+      const { sdkViewport } = viewportOptions;
 
-      const canUseRaw = typeof (sdkViewport as { isSupported?: () => boolean }).isSupported === 'function'
-        ? (sdkViewport as { isSupported?: () => boolean }).isSupported?.()
-        : false;
+      const canUseRaw = typeof sdkViewport.isSupported === 'function' ? sdkViewport.isSupported() : false;
 
       if (canUseRaw && typeof sdkViewport.requestFullscreen === 'function') {
         await sdkViewport.requestFullscreen();
@@ -597,6 +619,32 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     } catch (error) {
       console.warn('[tvm-app-adapter] Telegram requestFullscreen failed:', error);
     }
+  }
+
+  private getViewportMountOptions(): {
+    sdkViewport: typeof rawViewport & {
+      isSupported?: () => boolean;
+      isMounted?: () => boolean;
+      mount?: () => void | Promise<void>;
+      requestFullscreen?: () => Promise<void> | void;
+    };
+    fallbackMount: () => Promise<void>;
+  } {
+    const sdkViewport = rawViewport as typeof rawViewport & {
+      isSupported?: () => boolean;
+      isMounted?: () => boolean;
+      mount?: () => void | Promise<void>;
+      requestFullscreen?: () => Promise<void> | void;
+    };
+
+    return {
+      sdkViewport,
+      fallbackMount: async () => {
+        if (viewport.mount?.isAvailable?.()) {
+          await viewport.mount();
+        }
+      },
+    };
   }
 
   private notifyViewHide(): void {
@@ -617,6 +665,18 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         console.warn('[tvm-app-adapter] onViewRestore listener failed:', error);
       }
     }
+  }
+
+  protected override onDestroy(): void {
+    this.appearanceWatcherDispose?.();
+    this.appearanceWatcherDispose = undefined;
+    this.activeWatcherDispose?.();
+    this.activeWatcherDispose = undefined;
+    this.appearanceListeners.clear();
+    this.viewHideListeners.clear();
+    this.viewRestoreListeners.clear();
+    this.backHandlers.clear();
+    super.onDestroy();
   }
 
 }
