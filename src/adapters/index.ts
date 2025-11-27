@@ -30,6 +30,16 @@ export function detectPlatform(): MiniAppPlatform {
   }
 
   const userAgent = navigator.userAgent.toLowerCase();
+  const hasNativeBridge =
+    typeof (window as typeof window & { NativeBridge?: { postMessage?: unknown } }).NativeBridge?.postMessage ===
+    'function';
+
+  if (hasNativeBridge) {
+    if (userAgent.includes('android')) {
+      return 'shell_android';
+    }
+    return 'shell_ios';
+  }
 
   if (
     window.Telegram?.WebApp

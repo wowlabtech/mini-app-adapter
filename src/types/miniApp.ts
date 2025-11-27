@@ -243,6 +243,16 @@ export interface MiniAppAdapter {
   requestNotificationsPermission?(): Promise<boolean>;
 
   /**
+   * Subscribes to push token updates delivered by native shells.
+   */
+  onPushToken(listener: (token: string) => void): () => void;
+
+  /**
+   * Subscribes to native deep link events exposed by shell containers.
+   */
+  onDeepLink(listener: (path: string) => void): void;
+
+  /**
    * Subscribes to adapter environment updates (safe area, appearance etc.).
    */
   subscribe?(listener: () => void): () => void;

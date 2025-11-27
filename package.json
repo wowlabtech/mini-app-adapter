@@ -35,8 +35,8 @@
     "jsqr": "^1.4.0"
   },
   "peerDependencies": {
-    "react": ">=18",
-    "react-dom": ">=18"
+    "react": ">=19",
+    "react-dom": ">=19"
   },
   "devDependencies": {
     "@eslint/js": "^9.38.0",

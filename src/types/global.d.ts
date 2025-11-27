@@ -73,6 +73,12 @@ interface Window {
       payload?: Record<string, unknown>;
     }): void;
   };
+  nativePlatform?: 'shell_ios' | 'shell_android';
+  nativePushToken?: (token: string) => void;
+  nativeDeepLink?: (path: string) => void;
+  nativeQRResult?: (value: string) => void;
+  nativeAppActive?: () => void;
+  nativeAppBackground?: () => void;
 }
 
 declare module 'eruda' {

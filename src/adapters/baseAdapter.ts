@@ -106,6 +106,14 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return () => window.removeEventListener('popstate', handler);
   }
 
+  onPushToken(callback: (token: string) => void): () => void {
+    return this.shell.onPushToken(callback);
+  }
+
+  onDeepLink(callback: (path: string) => void): () => void {
+    return this.shell.onDeepLink(callback);
+  }
+
   async openExternalLink(url: string): Promise<void> {
     window.open(url, '_blank', 'noopener,noreferrer');
   }

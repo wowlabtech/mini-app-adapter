@@ -4,7 +4,6 @@ export type ShellPlatform = 'shell_ios' | 'shell_android';
 
 const SHELL_PLATFORMS: readonly ShellPlatform[] = ['shell_ios', 'shell_android'] as const;
 const SHELL_QR_TIMEOUT_MS = 60_000;
-const ADAPTER_INSTALL_FLAG = '__NATIVE_SHELL_ADAPTER_INSTALLED__';
 
 type ShellBridgeCommand =
   | {
@@ -30,6 +29,12 @@ interface NativeShellBridge {
 type ShellWindow = Window &
   Record<string, unknown> & {
     NativeBridge?: NativeShellBridge;
+    nativePlatform?: ShellPlatform;
+    nativePushToken?: (token: string) => void;
+    nativeDeepLink?: (path: string) => void;
+    nativeQRResult?: (value: string) => void;
+    nativeAppActive?: () => void;
+    nativeAppBackground?: () => void;
   };
 
 type PushListener = (token: string) => void;
@@ -47,6 +52,8 @@ const deepLinkListeners = new Set<DeepLinkListener>();
 const activeListeners = new Set<VoidListener>();
 const backgroundListeners = new Set<VoidListener>();
 
+let lastPushToken: string | null = null;
+
 let pendingQrRequest: PendingQrRequest | null = null;
 
 export interface ShellBridgeConfig {
@@ -59,26 +66,50 @@ export interface ShellBridgeConfig {
 }
 
 const DEFAULT_BRIDGE_CONFIG: ShellBridgeConfig = {
-  platformFlag: '__NATIVE_SHELL_PLATFORM__',
-  pushTokenCallback: '__NATIVE_SHELL_PUSH_TOKEN__',
-  qrResultCallback: '__NATIVE_SHELL_ON_QR_RESULT__',
-  deepLinkCallback: '__NATIVE_SHELL_ON_DEEPLINK__',
-  appActiveCallback: '__NATIVE_SHELL_ON_ACTIVE__',
-  appBackgroundCallback: '__NATIVE_SHELL_ON_BACKGROUND__',
+  platformFlag: 'nativePlatform',
+  pushTokenCallback: 'nativePushToken',
+  qrResultCallback: 'nativeQRResult',
+  deepLinkCallback: 'nativeDeepLink',
+  appActiveCallback: 'nativeAppActive',
+  appBackgroundCallback: 'nativeAppBackground',
 };
 
 let bridgeConfig: ShellBridgeConfig = { ...DEFAULT_BRIDGE_CONFIG };
 
+const BRIDGE_CALLBACK_KEYS = [
+  'pushTokenCallback',
+  'deepLinkCallback',
+  'appActiveCallback',
+  'appBackgroundCallback',
+  'qrResultCallback',
+] as const;
+
+type BridgeCallbackKey = (typeof BRIDGE_CALLBACK_KEYS)[number];
+
+let installedCallbackNames: Partial<Record<BridgeCallbackKey, string>> = {};
+
+function notifyPushListeners(token: string): void {
+  lastPushToken = token;
+  for (const listener of pushListeners) {
+    try {
+      listener(token);
+    } catch (error) {
+      console.warn('[tvm-app-adapter] push token listener failed:', error);
+    }
+  }
+}
+
 export interface ShellAPI {
   openNativeQR(): Promise<string>;
-  onPushToken(callback: PushListener): void;
-  onDeepLink(callback: DeepLinkListener): void;
-  onAppActive(callback: VoidListener): void;
-  onAppBackground(callback: VoidListener): void;
+  onPushToken(callback: PushListener): () => void;
+  onDeepLink(callback: DeepLinkListener): () => void;
+  onAppActive(callback: VoidListener): () => void;
+  onAppBackground(callback: VoidListener): () => void;
 }
 
 export function configureShellBridge(config: Partial<ShellBridgeConfig>): void {
   bridgeConfig = { ...bridgeConfig, ...config };
+  installGlobalCallbacks();
 }
 
 export function isShell(platform: MiniAppPlatform): platform is ShellPlatform {
@@ -98,7 +129,7 @@ export function readShellPlatform(): ShellPlatform | undefined {
   if (!shellWindow) {
     return undefined;
   }
-  const platform = shellWindow[bridgeConfig.platformFlag];
+  const platform = (shellWindow as Record<string, unknown>)[bridgeConfig.platformFlag];
   if (platform === 'shell_ios' || platform === 'shell_android') {
     return platform;
   }
@@ -120,17 +151,30 @@ export function createShellAPI(platform: PlatformResolver): ShellAPI {
       }
       return startHtml5Qrcode();
     },
-    onPushToken(callback: PushListener): void {
+    onPushToken(callback: PushListener): () => void {
       pushListeners.add(callback);
+      if (lastPushToken) {
+        queueMicrotask(() => {
+          try {
+            callback(lastPushToken as string);
+          } catch (error) {
+            console.warn('[tvm-app-adapter] push token listener failed:', error);
+          }
+        });
+      }
+      return () => pushListeners.delete(callback);
     },
-    onDeepLink(callback: DeepLinkListener): void {
+    onDeepLink(callback: DeepLinkListener): () => void {
       deepLinkListeners.add(callback);
+      return () => deepLinkListeners.delete(callback);
     },
-    onAppActive(callback: VoidListener): void {
+    onAppActive(callback: VoidListener): () => void {
       activeListeners.add(callback);
+      return () => activeListeners.delete(callback);
     },
-    onAppBackground(callback: VoidListener): void {
+    onAppBackground(callback: VoidListener): () => void {
       backgroundListeners.add(callback);
+      return () => backgroundListeners.delete(callback);
     },
   };
 }
@@ -177,24 +221,38 @@ function sendBridgeCommand(command: ShellBridgeCommand): boolean {
 
 function installGlobalCallbacks(): void {
   const shellWindow = getShellWindow();
-  if (!shellWindow || shellWindow[ADAPTER_INSTALL_FLAG]) {
+  if (!shellWindow) {
+    installedCallbackNames = {};
     return;
   }
 
-  shellWindow[ADAPTER_INSTALL_FLAG] = true;
-  const target = shellWindow as Record<string, unknown>;
+  const target = shellWindow as ShellWindow & Record<string, unknown>;
 
-  target[bridgeConfig.pushTokenCallback] = (token: string) => {
-    for (const listener of pushListeners) {
-      try {
-        listener(token);
-      } catch (error) {
-        console.warn('[tvm-app-adapter] push token listener failed:', error);
-      }
+  const assignCallback = (
+    key: BridgeCallbackKey,
+    handler: (...args: unknown[]) => void,
+  ) => {
+    const nextName = bridgeConfig[key];
+    const previousName = installedCallbackNames[key];
+    if (previousName && previousName !== nextName) {
+      delete target[previousName];
     }
+    installedCallbackNames[key] = nextName;
+    target[nextName] = handler;
   };
 
-  target[bridgeConfig.deepLinkCallback] = (path: string) => {
+  assignCallback('pushTokenCallback', (token: unknown) => {
+    if (typeof token !== 'string') {
+      return;
+    }
+    console.log('[tvm-app-adapter] nativePushToken', token);
+    notifyPushListeners(token);
+  });
+
+  assignCallback('deepLinkCallback', (path: unknown) => {
+    if (typeof path !== 'string') {
+      return;
+    }
     for (const listener of deepLinkListeners) {
       try {
         listener(path);
@@ -202,9 +260,9 @@ function installGlobalCallbacks(): void {
         console.warn('[tvm-app-adapter] deep link listener failed:', error);
       }
     }
-  };
+  });
 
-  target[bridgeConfig.appActiveCallback] = () => {
+  assignCallback('appActiveCallback', () => {
     for (const listener of activeListeners) {
       try {
         listener();
@@ -212,9 +270,9 @@ function installGlobalCallbacks(): void {
         console.warn('[tvm-app-adapter] app active listener failed:', error);
       }
     }
-  };
+  });
 
-  target[bridgeConfig.appBackgroundCallback] = () => {
+  assignCallback('appBackgroundCallback', () => {
     for (const listener of backgroundListeners) {
       try {
         listener();
@@ -222,16 +280,19 @@ function installGlobalCallbacks(): void {
         console.warn('[tvm-app-adapter] app background listener failed:', error);
       }
     }
-  };
+  });
 
-  target[bridgeConfig.qrResultCallback] = (value: string) => {
+  assignCallback('qrResultCallback', (value: unknown) => {
+    if (typeof value !== 'string') {
+      return;
+    }
     if (!pendingQrRequest) {
       return;
     }
     clearTimeout(pendingQrRequest.timeoutId);
     pendingQrRequest.resolve(value);
     pendingQrRequest = null;
-  };
+  });
 }
 
 function openNativeQrViaBridge(): Promise<string> {
