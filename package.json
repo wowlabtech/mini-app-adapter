@@ -23,7 +23,8 @@
     "build:watch": "tsup --watch",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0 --fix",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "publish": "npm publish --access public"
   },
   "dependencies": {
     "@tma.js/bridge": "^2.1.3",
