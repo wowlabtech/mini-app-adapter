@@ -14,6 +14,7 @@ import bridge, {
   type VKBridgeSubscribeHandler,
 } from '@vkontakte/vk-bridge';
 
+import { getVkPixelCode } from '@/config/vkAnalytics';
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
 import type {
   MiniAppCapability,
@@ -25,12 +26,22 @@ import type {
 import { isBridgeMethodSupported, type BridgeSupportsAsync } from '@/lib/bridge';
 import { computeCombinedSafeArea, createSafeAreaWatcher, readCssSafeArea } from '@/lib/safeArea';
 
+const ANALYTICS_EVENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,63}$/i;
+const ANALYTICS_FALLBACK_EVENT = 'VK_ANALYTICS_EVENT';
+
+type VkAnalyticsMethod = 'VKWebAppConversionHit' | 'VKWebAppRetargetingPixel';
+type VkAnalyticsEnvelope = {
+  method: VkAnalyticsMethod;
+  params: Record<string, unknown>;
+};
+
 export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   private configSafeArea?: MiniAppEnvironmentInfo['safeArea'];
   private stopViewportTracking?: () => void;
   private readonly supportsAsync?: BridgeSupportsAsync<AnyRequestMethodName> = typeof bridge.supportsAsync === 'function'
     ? bridge.supportsAsync.bind(bridge)
     : undefined;
+  private pixelCodeWarningShown = false;
 
   override computeSafeArea(): MiniAppEnvironmentInfo['safeArea'] {
     const baseSafeArea = this.computeBaseSafeArea();
@@ -285,6 +296,138 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     } catch (error) {
       console.warn('[tvm-app-adapter] VK downloadFile failed:', error);
       await super.downloadFile(url, filename);
+    }
+  }
+
+  override trackConversionEvent(event: string, payload?: Record<string, unknown>): void {
+    const normalizedEvent = this.normalizeAnalyticsEventName(event);
+    if (!normalizedEvent) {
+      return;
+    }
+
+    const envelope: VkAnalyticsEnvelope = {
+      method: 'VKWebAppConversionHit',
+      params: {
+        event: normalizedEvent,
+        params: this.normalizeAnalyticsPayload(payload),
+      },
+    };
+
+    this.dispatchAnalytics(envelope);
+  }
+
+  override trackPixelEvent(event: string, payload?: Record<string, unknown>): void {
+    const pixelCode = getVkPixelCode();
+    if (!pixelCode) {
+      if (!this.pixelCodeWarningShown) {
+        console.warn('[VKAnalytics] VK pixel code is not configured. Call configureVkPixel() before tracking.');
+        this.pixelCodeWarningShown = true;
+      }
+      return;
+    }
+
+    const normalizedEvent = this.normalizeAnalyticsEventName(event);
+    if (!normalizedEvent) {
+      return;
+    }
+
+    const envelope: VkAnalyticsEnvelope = {
+      method: 'VKWebAppRetargetingPixel',
+      params: {
+        pixel_code: pixelCode,
+        type: normalizedEvent,
+        data: this.normalizeAnalyticsPayload(payload),
+      },
+    };
+
+    this.pixelCodeWarningShown = false;
+    this.dispatchAnalytics(envelope);
+  }
+
+  private dispatchAnalytics(envelope: VkAnalyticsEnvelope): void {
+    if (typeof bridge.isWebView === 'function') {
+      try {
+        if (!bridge.isWebView()) {
+          this.emitAnalyticsFallback(envelope);
+          return;
+        }
+      } catch (error) {
+        console.warn('[VKAnalytics] bridge.isWebView check failed:', error);
+        this.emitAnalyticsFallback(envelope);
+        return;
+      }
+    }
+
+    void this.safeBridgeSend(envelope.method, envelope.params);
+  }
+
+  private emitAnalyticsFallback(envelope: VkAnalyticsEnvelope): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const detail = {
+      ...envelope,
+      timestamp: Date.now(),
+    };
+
+    if (typeof window.dispatchEvent === 'function' && typeof window.CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(ANALYTICS_FALLBACK_EVENT, { detail }));
+      return;
+    }
+
+    try {
+      window.postMessage({ type: ANALYTICS_FALLBACK_EVENT, detail }, '*');
+    } catch (error) {
+      console.warn('[VKAnalytics] fallback dispatch failed', error);
+    }
+  }
+
+  private normalizeAnalyticsEventName(event: string): string | null {
+    if (typeof event !== 'string') {
+      return null;
+    }
+
+    const trimmed = event.trim();
+    if (!trimmed || !ANALYTICS_EVENT_NAME_PATTERN.test(trimmed)) {
+      console.warn(`[VKAnalytics] Invalid event name: "${event}"`);
+      return null;
+    }
+
+    return trimmed;
+  }
+
+  private normalizeAnalyticsPayload(payload?: Record<string, unknown>): Record<string, unknown> {
+    if (!this.isPlainObject(payload)) {
+      return {};
+    }
+
+    return { ...payload };
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (value === null || typeof value !== 'object') {
+      return false;
+    }
+
+    if (Array.isArray(value)) {
+      return false;
+    }
+
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  }
+
+  private async safeBridgeSend(method: VkAnalyticsMethod, params: Record<string, unknown>): Promise<void> {
+    try {
+      const supported = await this.supportsBridgeMethod(method as AnyRequestMethodName);
+      if (!supported) {
+        return;
+      }
+
+      await bridge.send(method as AnyRequestMethodName, params as never);
+    } catch (error) {
+      console.warn(`[VKAnalytics] ${method} failed`, error);
     }
   }
 

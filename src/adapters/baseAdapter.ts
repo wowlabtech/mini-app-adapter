@@ -175,6 +175,14 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return Promise.resolve();
   }
 
+  trackConversionEvent(_event: string, _payload?: Record<string, unknown>): void {
+    // No-op by default; platform-specific adapters can override.
+  }
+
+  trackPixelEvent(_event: string, _payload?: Record<string, unknown>): void {
+    // No-op by default; platform-specific adapters can override.
+  }
+
   copyTextToClipboard(text: string): Promise<void> {
     return navigator.clipboard.writeText(text).catch(() => {
       // Fallback for older browsers

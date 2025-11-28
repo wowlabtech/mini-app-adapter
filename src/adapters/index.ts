@@ -3,8 +3,16 @@ import { ShellMiniAppAdapter } from '@/adapters/shellAdapter';
 import { TelegramMiniAppAdapter } from '@/adapters/telegramAdapter';
 import { VKMiniAppAdapter } from '@/adapters/vkAdapter';
 import { WebMiniAppAdapter } from '@/adapters/webAdapter';
+import { setVkPixelCode } from '@/config/vkAnalytics';
 import type { MiniAppAdapter, MiniAppPlatform } from '@/types/miniApp';
 import { readShellPlatform } from '@/lib/shell';
+
+export interface CreateAdapterOptions {
+  platform?: MiniAppPlatform;
+  vk?: {
+    pixelCode?: string;
+  };
+}
 
 export function detectPlatform(): MiniAppPlatform {
   if (typeof window === 'undefined') {
@@ -65,7 +73,17 @@ export function detectPlatform(): MiniAppPlatform {
 }
 
 
-export function createAdapter(platform: MiniAppPlatform = detectPlatform()): MiniAppAdapter {
+export function createAdapter(): MiniAppAdapter;
+export function createAdapter(platform: MiniAppPlatform): MiniAppAdapter;
+export function createAdapter(options: CreateAdapterOptions): MiniAppAdapter;
+export function createAdapter(input?: MiniAppPlatform | CreateAdapterOptions): MiniAppAdapter {
+  const options = normalizeCreateAdapterOptions(input);
+  const platform = options.platform ?? detectPlatform();
+
+  if (platform === 'vk') {
+    setVkPixelCode(options.vk?.pixelCode ?? null);
+  }
+
   switch (platform) {
     case 'shell_ios':
     case 'shell_android':
@@ -79,4 +97,16 @@ export function createAdapter(platform: MiniAppPlatform = detectPlatform()): Min
     default:
       return new WebMiniAppAdapter();
   }
+}
+
+function normalizeCreateAdapterOptions(input?: MiniAppPlatform | CreateAdapterOptions): CreateAdapterOptions {
+  if (!input) {
+    return {};
+  }
+
+  if (typeof input === 'string') {
+    return { platform: input };
+  }
+
+  return input;
 }

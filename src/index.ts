@@ -37,6 +37,10 @@ export {
   detectPlatform,
 } from '@/adapters';
 
+export type {
+  CreateAdapterOptions,
+} from '@/adapters';
+
 export {
   AdapterProvider,
   useMiniAppAdapter,
@@ -53,6 +57,16 @@ export {
 export {
   getActiveAdapter,
 } from '@/registry';
+
+export {
+  trackConversionEvent,
+  trackPixelEvent,
+  configureVkPixel,
+} from '@/analytics';
+
+export {
+  getPlatform,
+} from '@/platform';
 
 export {
   shell,

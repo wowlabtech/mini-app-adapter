@@ -76,15 +76,12 @@ const DEFAULT_BRIDGE_CONFIG: ShellBridgeConfig = {
 
 let bridgeConfig: ShellBridgeConfig = { ...DEFAULT_BRIDGE_CONFIG };
 
-const BRIDGE_CALLBACK_KEYS = [
-  'pushTokenCallback',
-  'deepLinkCallback',
-  'appActiveCallback',
-  'appBackgroundCallback',
-  'qrResultCallback',
-] as const;
-
-type BridgeCallbackKey = (typeof BRIDGE_CALLBACK_KEYS)[number];
+type BridgeCallbackKey =
+  | 'pushTokenCallback'
+  | 'deepLinkCallback'
+  | 'appActiveCallback'
+  | 'appBackgroundCallback'
+  | 'qrResultCallback';
 
 let installedCallbackNames: Partial<Record<BridgeCallbackKey, string>> = {};
 

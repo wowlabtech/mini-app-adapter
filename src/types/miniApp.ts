@@ -281,4 +281,14 @@ export interface MiniAppAdapter {
    * Shares a story using platform-specific capabilities.
    */
   shareStory?(mediaUrl: string, options?: MiniAppShareStoryOptions): Promise<void>;
+
+  /**
+   * Sends analytics event to the host platform if supported.
+   */
+  trackConversionEvent(event: string, payload?: Record<string, unknown>): void;
+
+  /**
+   * Sends retargeting pixel event if supported.
+   */
+  trackPixelEvent(event: string, payload?: Record<string, unknown>): void;
 }
