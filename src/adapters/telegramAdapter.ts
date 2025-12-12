@@ -19,8 +19,6 @@ import {
   setDebug,
   themeParams,
   viewport,
-  
-  type ThemeParams,
 } from '@tma.js/sdk-react';
 import {
   decodeStartParam,
@@ -33,6 +31,10 @@ import {
   copyTextToClipboard as copyTextToClipboardSdk,
   downloadFile as downloadFileSdk,
   shareStory as shareStorySdk,
+  addToHomeScreen as addToHomeScreenSdk,
+  checkHomeScreenStatus as checkHomeScreenStatusSdk,
+  on,
+  off,
 } from '@tma.js/sdk';
 
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
@@ -90,14 +92,14 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       mockTelegramEnv({
         onEvent(event, next) {
           if (event.name === 'web_app_request_theme') {
-            let tp: ThemeParams = {};
+            let tp: Record<string, string | undefined> = {};
             if (firstThemeSent) {
               tp = themeParams.state();
             } else {
               firstThemeSent = true;
               tp ||= retrieveLaunchParams().tgWebAppThemeParams;
             }
-            return emitEvent('theme_changed', { theme_params: tp });
+            return emitEvent('theme_changed', { theme_params: tp as Record<string, `#${string}` | undefined> });
           }
 
           if (event.name === 'web_app_request_safe_area') {
@@ -467,7 +469,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override shareUrl(url: string, text?: string): void {
-    return shareURLSdk(url ,text);
+    return shareURLSdk(url, text);
   }
 
   override async downloadFile(url: string, filename: string): Promise<void> {
@@ -486,6 +488,60 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
   override async shareStory(mediaUrl: string, options?: MiniAppShareStoryOptions): Promise<void> {
     shareStorySdk(mediaUrl, options);
+  }
+
+  override async addToHomeScreen(): Promise<boolean> {
+    const isAvailable = typeof addToHomeScreenSdk?.isAvailable === 'function'
+      ? addToHomeScreenSdk.isAvailable()
+      : true;
+
+    if (!isAvailable) {
+      return super.addToHomeScreen();
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const cleanup = () => {
+        off('home_screen_added', handleSuccess);
+        off('home_screen_failed', handleFail);
+      };
+
+      const handleSuccess = () => {
+        cleanup();
+        resolve(true);
+      };
+
+      const handleFail = () => {
+        cleanup();
+        resolve(false);
+      };
+
+      on('home_screen_added', handleSuccess);
+      on('home_screen_failed', handleFail);
+
+      try {
+        addToHomeScreenSdk();
+      } catch (error) {
+        cleanup();
+        console.warn('[tvm-app-adapter] Telegram addToHomeScreen failed:', error);
+        resolve(false);
+      }
+    });
+  }
+
+  override async checkHomeScreenStatus(): Promise<'added' | 'not_added' | 'unknown' | string> {
+    try {
+      const status = await checkHomeScreenStatusSdk();
+      if (typeof status === 'string') {
+        return status;
+      }
+      if (typeof status === 'boolean') {
+        return status ? 'added' : 'not_added';
+      }
+      return 'unknown';
+    } catch (error) {
+      console.warn('[tvm-app-adapter] Telegram checkHomeScreenStatus failed:', error);
+      return 'unknown';
+    }
   }
 
   override async requestPhone(): Promise<string | null> {

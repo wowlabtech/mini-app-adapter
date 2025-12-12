@@ -5,12 +5,21 @@ import type { MiniAppQrScanOptions } from '@/types/miniApp';
 import { triggerFileDownload } from '@/lib/download';
 
 export class WebMiniAppAdapter extends BaseMiniAppAdapter {
+  private deferredPrompt: BeforeInstallPromptEvent | null = null;
+
   constructor() {
     super("web", {
       sdkVersion: navigator.userAgent,
       languageCode: navigator.language,
       isWebView: false,
     });
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeinstallprompt', (event: Event) => {
+        event.preventDefault();
+        this.deferredPrompt = event as BeforeInstallPromptEvent;
+      });
+    }
   }
 
   override async downloadFile(url: string, filename: string): Promise<void> {
@@ -207,4 +216,60 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       }
     });
   }
+
+  shareUrl(url: string, text: string): void {
+    if (navigator.share) {
+      try {
+        navigator.share({ title: text, text, url });
+        return;
+      } catch (err) {
+        console.warn('Share cancelled or failed:', err);
+      }
+    }
+
+    const payload = text ? `${text}\n${url}` : url;
+    this.copyTextToClipboard(payload).catch((err) => {
+      console.warn('Share fallback (clipboard) failed:', err);
+    });
+  }
+
+  override async addToHomeScreen(): Promise<boolean> {
+    const isAndroid = /android/i.test(navigator.userAgent);
+    if (!isAndroid || !this.deferredPrompt) {
+      return super.addToHomeScreen();
+    }
+
+    try {
+      this.deferredPrompt.prompt();
+      const choice = await this.deferredPrompt.userChoice;
+      this.deferredPrompt = null;
+      return choice?.outcome === 'accepted';
+    } catch (error) {
+      console.warn('[tvm-app-adapter] Web addToHomeScreen failed:', error);
+      this.deferredPrompt = null;
+      return false;
+    }
+  }
+
+  override async checkHomeScreenStatus(): Promise<'added' | 'not_added' | 'unknown' | string> {
+    try {
+      const isStandalone =
+        (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches) ||
+        // iOS Safari specific flag
+        (typeof navigator !== 'undefined' && (navigator as unknown as { standalone?: boolean }).standalone === true);
+
+      if (isStandalone) {
+        return 'added';
+      }
+      return 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+}
+
+// Minimal BeforeInstallPromptEvent typing to avoid lib.dom dependency mismatch.
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome?: 'accepted' | 'dismissed'; platform?: string }>;
 }

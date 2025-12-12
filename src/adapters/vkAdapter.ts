@@ -237,6 +237,43 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
+  override async addToHomeScreen(): Promise<boolean> {
+    const supported = await this.supportsBridgeMethod('VKWebAppAddToHomeScreen');
+    if (!supported) {
+      console.warn('[tvm-app-adapter] VK addToHomeScreen not supported');
+      return super.addToHomeScreen();
+    }
+
+    try {
+      const response = await bridge.send('VKWebAppAddToHomeScreen');
+      if (response && typeof response === 'object' && 'result' in response) {
+        return Boolean((response as { result?: unknown }).result);
+      }
+      return true;
+    } catch (error) {
+      console.warn('[tvm-app-adapter] VK addToHomeScreen failed:', error);
+      return false;
+    }
+  }
+
+  override async denyNotifications(): Promise<boolean> {
+    const supported = await this.supportsBridgeMethod('VKWebAppDenyNotifications');
+    if (!supported) {
+      return super.denyNotifications();
+    }
+
+    try {
+      const response = await bridge.send('VKWebAppDenyNotifications');
+      if (response && typeof response === 'object' && 'result' in response) {
+        return Boolean((response as { result?: unknown }).result);
+      }
+      return true;
+    } catch (error) {
+      console.warn('[tvm-app-adapter] VK deny notifications failed:', error);
+      return false;
+    }
+  }
+
   override async scanQRCode(options?: MiniAppQrScanOptions): Promise<string | null> {
     const supportsQrScanner = await this.supportsBridgeMethod('VKWebAppOpenCodeReader');
     
@@ -278,6 +315,28 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       url: mediaUrl,
     };
     await bridge.send('VKWebAppShowStoryBox', bridgeOptions)
+  }
+
+  override shareUrl(url: string, text?: string): void {
+    void this.shareUrlInternal(url, text);
+  }
+
+  private async shareUrlInternal(url: string, text?: string): Promise<void> {
+    const supported = await this.supportsBridgeMethod('VKWebAppShare');
+    if (!supported) {
+      super.shareUrl(url, text ?? '');
+      return;
+    }
+
+    try {
+      await bridge.send('VKWebAppShare', {
+        link: url,
+        ...(text ? { text } : {}),
+      });
+    } catch (error) {
+      console.warn('[tvm-app-adapter] VK shareUrl failed:', error);
+      super.shareUrl(url, text ?? '');
+    }
   }
 
   override async downloadFile(url: string, filename: string): Promise<void> {

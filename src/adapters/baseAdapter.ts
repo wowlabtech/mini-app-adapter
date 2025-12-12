@@ -167,6 +167,7 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     // No-op by default.
   }
 
+
   async downloadFile(url: string, filename: string): Promise<void> {
     await triggerFileDownload(url, filename);
   }
@@ -252,6 +253,32 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
   }
 
   async requestNotificationsPermission(): Promise<boolean> {
+    if (typeof Notification === 'undefined' || typeof Notification.requestPermission !== 'function') {
+      return false;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      return permission === 'granted';
+    } catch (error) {
+      console.warn('[tvm-app-adapter] requestNotificationsPermission fallback failed:', error);
+      return false;
+    }
+  }
+
+  async addToHomeScreen(): Promise<boolean> {
+    // Браузерный универсальный промпт отсутствует
+    return false;
+  }
+
+  async checkHomeScreenStatus(): Promise<'added' | 'not_added' | 'unknown' | string> {
+    return 'unknown';
+  }
+
+  async denyNotifications(): Promise<boolean> {
+    // Браузер не предоставляет API для принудительного отключения ранее выданного разрешения
+    // уведомлений, поэтому по умолчанию возвращаем false.
+    console.warn('[tvm-app-adapter] denyNotifications fallback is not supported in this environment.');
     return false;
   }
 

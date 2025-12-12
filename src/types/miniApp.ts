@@ -243,6 +243,24 @@ export interface MiniAppAdapter {
   requestNotificationsPermission?(): Promise<boolean>;
 
   /**
+   * Prompts user to add the mini app to the home screen if supported.
+   * Resolves with true when the prompt succeeded.
+   */
+  addToHomeScreen?(): Promise<boolean>;
+
+  /**
+   * Checks whether the mini app is already added to the home screen, if supported.
+   * Returns platform-specific status or 'unknown' when not available.
+   */
+  checkHomeScreenStatus?(): Promise<'added' | 'not_added' | 'unknown' | string>;
+
+  /**
+   * Revokes/denies push notifications if supported by the platform.
+   * Resolves with true if notifications were disabled.
+   */
+  denyNotifications?(): Promise<boolean>;
+
+  /**
    * Subscribes to push token updates delivered by native shells.
    */
   onPushToken(listener: (token: string) => void): () => void;
