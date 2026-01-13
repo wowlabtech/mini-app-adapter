@@ -43,6 +43,11 @@ export interface MiniAppViewportInsets {
   contentSafeArea: MiniAppSafeAreaInsets;
 }
 
+export interface MiniAppViewportState {
+  height: number;
+  stableHeight: number;
+}
+
 export interface MiniAppInitOptions {
   /**
    * Enables verbose logs for platforms that support it.
@@ -185,6 +190,11 @@ export interface MiniAppAdapter {
    * Requests fullscreen mode if supported by the platform.
    */
   requestFullscreen?(): void;
+
+  /**
+   * Subscribes to viewport size changes. Returns disposer.
+   */
+  onViewportChange?(callback: (state: MiniAppViewportState) => void): () => void;
 
   /**
    * Returns viewport safe area insets if supported by the platform.

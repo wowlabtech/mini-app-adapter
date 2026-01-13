@@ -155,6 +155,32 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     // No-op by default.
   }
 
+  onViewportChange(callback: (state: { height: number; stableHeight: number }) => void): () => void {
+    if (typeof window === 'undefined') {
+      return () => {};
+    }
+
+    const fallbackHeight = () => window.visualViewport?.height ?? window.innerHeight;
+
+    const notify = () => {
+      const height = fallbackHeight();
+      callback({ height, stableHeight: height });
+    };
+
+    notify();
+
+    const onResize = () => notify();
+    window.visualViewport?.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('scroll', onResize);
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('scroll', onResize);
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
   getViewportInsets(): MiniAppViewportInsets | undefined {
     return undefined;
   }

@@ -388,6 +388,79 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
+  override onViewportChange(callback: (state: { height: number; stableHeight: number }) => void): () => void {
+    const disposers: Array<() => void> = [];
+    const fallbackHeight = () => (typeof window !== 'undefined'
+      ? (window.visualViewport?.height ?? window.innerHeight)
+      : 0);
+
+    const notify = (state?: { height?: number; stableHeight?: number }) => {
+      const heightCandidate = state?.height ?? this.safeHeightFromSdk();
+      const stableCandidate = state?.stableHeight ?? this.stableHeightFromSdk();
+
+      const height = Number.isFinite(heightCandidate) ? (heightCandidate as number) : fallbackHeight();
+      const stableHeight = Number.isFinite(stableCandidate) && (stableCandidate as number) > 0
+        ? (stableCandidate as number)
+        : height;
+
+      callback({ height, stableHeight });
+    };
+
+    const ensureMounted = async () => {
+      try {
+        await ensureViewportMounted(this.getViewportMountOptions());
+      } catch (error) {
+        console.warn('[tvm-app-adapter] ensureViewportMounted failed:', error);
+      }
+    };
+
+    void ensureMounted().finally(() => notify());
+
+    const { sdkViewport } = this.getViewportMountOptions();
+
+    if (typeof sdkViewport.on === 'function') {
+      try {
+        const off = sdkViewport.on('change', (next) => notify(next as { height?: number; stableHeight?: number }));
+        if (typeof off === 'function') {
+          disposers.push(off);
+        }
+      } catch (error) {
+        console.warn('[tvm-app-adapter] viewport.on(change) subscription failed:', error);
+      }
+    }
+
+    try {
+      if (typeof sdkViewport.height?.sub === 'function') {
+        disposers.push(sdkViewport.height.sub(() => notify()));
+      }
+      if (typeof sdkViewport.stableHeight?.sub === 'function') {
+        disposers.push(sdkViewport.stableHeight.sub(() => notify()));
+      }
+    } catch (error) {
+      console.warn('[tvm-app-adapter] viewport signal subscriptions failed:', error);
+    }
+
+    if (typeof window !== 'undefined') {
+      const onResize = () => notify();
+      window.visualViewport?.addEventListener('resize', onResize);
+      window.addEventListener('resize', onResize);
+      disposers.push(() => {
+        window.visualViewport?.removeEventListener('resize', onResize);
+        window.removeEventListener('resize', onResize);
+      });
+    }
+
+    return () => {
+      disposers.forEach((dispose) => {
+        try {
+          dispose();
+        } catch {
+          /* ignore */
+        }
+      });
+    };
+  }
+
   override onAppearanceChange(
     callback: (appearance: 'dark' | 'light' | undefined) => void,
   ): () => void {
@@ -683,6 +756,9 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       isMounted?: () => boolean;
       mount?: () => void | Promise<void>;
       requestFullscreen?: () => Promise<void> | void;
+      on?: (event: 'change', cb: (state: { height?: number; stableHeight?: number }) => void) => (() => void) | void;
+      height?: (() => number) & { sub?: (cb: () => void) => () => void };
+      stableHeight?: (() => number) & { sub?: (cb: () => void) => () => void };
     };
     fallbackMount: () => Promise<void>;
   } {
@@ -691,6 +767,9 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       isMounted?: () => boolean;
       mount?: () => void | Promise<void>;
       requestFullscreen?: () => Promise<void> | void;
+      on?: (event: 'change', cb: (state: { height?: number; stableHeight?: number }) => void) => (() => void) | void;
+      height?: (() => number) & { sub?: (cb: () => void) => () => void };
+      stableHeight?: (() => number) & { sub?: (cb: () => void) => () => void };
     };
 
     return {
@@ -701,6 +780,28 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         }
       },
     };
+  }
+
+  private safeHeightFromSdk(): number | undefined {
+    try {
+      if (typeof rawViewport.height === 'function') {
+        return rawViewport.height();
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private stableHeightFromSdk(): number | undefined {
+    try {
+      if (typeof rawViewport.stableHeight === 'function') {
+        return rawViewport.stableHeight();
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
   }
 
   private notifyViewHide(): void {
