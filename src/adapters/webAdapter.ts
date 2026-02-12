@@ -1,4 +1,4 @@
-import { Html5Qrcode } from "html5-qrcode";
+import jsQR from "jsqr";
 
 import { BaseMiniAppAdapter } from './baseAdapter';
 import type { MiniAppQrScanOptions } from '@/types/miniApp';
@@ -98,14 +98,33 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       // ===============================================
       //  CENTER SCAN AREA
       // ===============================================
+      const scanSize = Math.min(Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.72), 320);
+      const scanBox = document.createElement("div");
+      scanBox.style.width = `${scanSize}px`;
+      scanBox.style.height = `${scanSize}px`;
+      scanBox.style.position = "relative";
+      scanBox.style.flex = "0 0 auto";
+      scanBox.style.borderRadius = "18px";
+      scanBox.style.overflow = "hidden";
+      overlay.appendChild(scanBox);
+
       const scanArea = document.createElement("div");
-      scanArea.id = "qr-reader";
-      scanArea.style.width = "300px";
-      scanArea.style.height = "300px";
-      scanArea.style.borderRadius = "18px";
-      scanArea.style.overflow = "hidden";
-      scanArea.style.position = "relative";
-      overlay.appendChild(scanArea);
+      scanArea.style.position = "absolute";
+      scanArea.style.inset = "0";
+      scanArea.style.zIndex = "1";
+      scanArea.style.background = "#000";
+      scanBox.appendChild(scanArea);
+
+      const video = document.createElement("video");
+      video.setAttribute("playsinline", "true");
+      video.autoplay = true;
+      video.muted = true;
+      video.style.width = "100%";
+      video.style.height = "100%";
+      video.style.objectFit = "cover";
+      video.style.position = "absolute";
+      video.style.inset = "0";
+      scanArea.appendChild(video);
 
       // ===============================================
       //  WHITE TELEGRAM-LIKE FRAME
@@ -119,8 +138,8 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       frame.style.border = "3px solid rgba(255,255,255,0.9)";
       frame.style.borderRadius = "18px";
       frame.style.pointerEvents = "none";
-      frame.style.zIndex = "10";
-      scanArea.appendChild(frame);
+      frame.style.zIndex = "3";
+      scanBox.appendChild(frame);
 
       // ===============================================
       //  SCAN LINE ANIMATION
@@ -133,8 +152,8 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       line.style.background = "rgba(255,255,255,0.85)";
       line.style.borderRadius = "2px";
       line.style.animation = "qr-line 2s infinite";
-      line.style.zIndex = "11";
-      scanArea.appendChild(line);
+      line.style.zIndex = "4";
+      scanBox.appendChild(line);
 
       const styleTag = document.createElement("style");
       styleTag.innerHTML = `
@@ -157,10 +176,11 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       hint.style.opacity = "0.9";
       overlay.appendChild(hint);
 
-      // ===============================================
-      //  HTML5-QRCODE INSTANCE
-      // ===============================================
-      const scanner = new Html5Qrcode("qr-reader");
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      let stream: MediaStream | null = null;
+      let rafId: number | null = null;
+      let lastScanAt = 0;
 
       let closed = false;
       const finalize = async (result: string | null) => {
@@ -168,9 +188,15 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
           return;
         }
         closed = true;
-        try {
-          await scanner.stop();
-        } catch {}
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop());
+          stream = null;
+        }
+        video.srcObject = null;
         overlay.remove();
         styleTag.remove();
 
@@ -198,25 +224,61 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       //  START CAM
       // ===============================================
       try {
-        await scanner.start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
-          },
-          (decodedText: string) => {
-            closeScanner(decodedText);
-          },
-          () => {}
-        );
+        const constraints: MediaStreamConstraints[] = [
+          { video: { facingMode: { ideal: "environment" } }, audio: false },
+          { video: { facingMode: "environment" }, audio: false },
+          { video: true, audio: false },
+        ];
+
+        let lastError: unknown = null;
+        for (const constraint of constraints) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraint);
+            break;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        if (!stream) {
+          throw lastError instanceof Error ? lastError : new Error("Unable to access camera");
+        }
+
+        video.srcObject = stream;
+        await video.play();
+
+        const scanFrame = (now: number) => {
+          if (closed) {
+            return;
+          }
+          if (now - lastScanAt >= 100 && context && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            const width = video.videoWidth;
+            const height = video.videoHeight;
+            if (width > 0 && height > 0) {
+              canvas.width = width;
+              canvas.height = height;
+              context.drawImage(video, 0, 0, width, height);
+              const imageData = context.getImageData(0, 0, width, height);
+              const result = jsQR(imageData.data, width, height, {
+                inversionAttempts: "attemptBoth",
+              });
+              if (result?.data) {
+                closeScanner(result.data);
+                return;
+              }
+              lastScanAt = now;
+            }
+          }
+          rafId = requestAnimationFrame(scanFrame);
+        };
+
+        rafId = requestAnimationFrame(scanFrame);
       } catch (error) {
         console.error("QR Start error", error);
         closeScanner(null);
       }
     });
   }
-
   shareUrl(url: string, text: string): void {
     if (navigator.share) {
       try {
