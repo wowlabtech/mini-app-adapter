@@ -1,6 +1,6 @@
 {
   "name": "@wowlabtech/mini-app-adapter",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Cross-platform adapter toolkit for Telegram, VK, and MAX mini apps.",
   "type": "module",
   "private": false,
@@ -24,7 +24,7 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0 --fix",
     "prepublishOnly": "npm run build",
-    "publish": "npm publish --access public"
+    "publish": "npm publish"
   },
   "dependencies": {
     "@tma.js/bridge": "^2.2.0",
