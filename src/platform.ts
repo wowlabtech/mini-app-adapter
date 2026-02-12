@@ -7,15 +7,19 @@ let cachedPlatform: MiniAppPlatform | null = null;
 export function getPlatform(): MiniAppPlatform {
   const adapter = getActiveAdapter();
   if (adapter) {
-    cachedPlatform = adapter.platform;
+    if (adapter.platform !== 'web') {
+      cachedPlatform = adapter.platform;
+    }
     return adapter.platform;
   }
 
-  if (cachedPlatform) {
+  if (cachedPlatform && cachedPlatform !== 'web') {
     return cachedPlatform;
   }
 
   const detectedPlatform = detectPlatform();
-  cachedPlatform = detectedPlatform;
+  if (detectedPlatform !== 'web') {
+    cachedPlatform = detectedPlatform;
+  }
   return detectedPlatform;
 }

@@ -7,6 +7,9 @@ import { setVkPixelCode } from '@/config/vkAnalytics';
 import type { MiniAppAdapter, MiniAppPlatform } from '@/types/miniApp';
 import { readShellPlatform } from '@/lib/shell';
 
+const CONFIRMED_PLATFORM_STORAGE_KEY = 'mini-app-adapter:confirmed-platform';
+const CONFIRMED_PLATFORM_TTL_MS = 30 * 60 * 1000;
+
 export interface CreateAdapterOptions {
   platform?: MiniAppPlatform;
   vk?: {
@@ -31,9 +34,41 @@ export function detectPlatform(): MiniAppPlatform {
     searchParams.get(name) ?? hashParams.get(name);
 
   const hasParam = (...names: string[]): boolean => names.some((name) => getParam(name));
+  const readConfirmedPlatform = (): MiniAppPlatform | null => {
+    try {
+      const raw = window.sessionStorage.getItem(CONFIRMED_PLATFORM_STORAGE_KEY);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw) as { platform?: MiniAppPlatform; ts?: number };
+      if (!parsed?.platform || typeof parsed.ts !== 'number') {
+        return null;
+      }
+      if (Date.now() - parsed.ts > CONFIRMED_PLATFORM_TTL_MS) {
+        return null;
+      }
+      return parsed.platform;
+    } catch {
+      return null;
+    }
+  };
+  const persistConfirmedPlatform = (platform: MiniAppPlatform): void => {
+    if (platform === 'web') {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(
+        CONFIRMED_PLATFORM_STORAGE_KEY,
+        JSON.stringify({ platform, ts: Date.now() }),
+      );
+    } catch {
+      // Ignore storage errors.
+    }
+  };
 
   const shellPlatform = readShellPlatform();
   if (shellPlatform) {
+    persistConfirmedPlatform(shellPlatform);
     return shellPlatform;
   }
 
@@ -44,29 +79,54 @@ export function detectPlatform(): MiniAppPlatform {
 
   if (hasNativeBridge) {
     if (userAgent.includes('android')) {
+      persistConfirmedPlatform('shell_android');
       return 'shell_android';
     }
+    persistConfirmedPlatform('shell_ios');
     return 'shell_ios';
   }
 
+  const telegramGlobals = window as typeof window & {
+    TelegramWebviewProxy?: unknown;
+    TelegramGameProxy?: unknown;
+  };
+  const hasTelegramGlobal =
+    Boolean(window.Telegram?.WebApp)
+    || typeof telegramGlobals.TelegramWebviewProxy !== 'undefined'
+    || typeof telegramGlobals.TelegramGameProxy !== 'undefined';
+  const hasTelegramParams = hasParam('tgWebAppPlatform', 'tgWebAppVersion', 'tgWebAppData', 'tgWebAppLanguage');
   if (
-    window.Telegram?.WebApp
-    || hasParam('tgWebAppPlatform', 'tgWebAppVersion', 'tgWebAppData', 'tgWebAppLanguage')
+    hasTelegramGlobal
+    || hasTelegramParams
     || userAgent.includes('telegram')
   ) {
+    persistConfirmedPlatform('telegram');
     return 'telegram';
   }
 
   if (window.WebApp) {
+    persistConfirmedPlatform('max');
     return 'max';
   }
 
   if ((window as typeof window & { MaxMiniApp?: unknown }).MaxMiniApp) {
+    persistConfirmedPlatform('max');
     return 'max';
   }
 
-  if (hasParam('vk_app_id', 'vk_platform')) {
+  const hasVkParams = hasParam('vk_app_id', 'vk_platform', 'vk_user_id', 'vk_language', 'sign');
+  const hasVkUserAgentSignal =
+    userAgent.includes('vkclient')
+    || userAgent.includes('vk-android')
+    || userAgent.includes('vkontakte');
+  if (hasVkParams || hasVkUserAgentSignal) {
+    persistConfirmedPlatform('vk');
     return 'vk';
+  }
+
+  const confirmedPlatform = readConfirmedPlatform();
+  if (confirmedPlatform && confirmedPlatform !== 'web') {
+    return confirmedPlatform;
   }
 
   return 'web';
