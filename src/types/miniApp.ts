@@ -54,7 +54,7 @@ export interface MiniAppInitOptions {
    */
   debug?: boolean;
   /**
-   * Dynamically loads Eruda devtools if supported.
+   * Enables Eruda devtools when host app already exposed `window.eruda`.
    */
   eruda?: boolean;
   /**
@@ -64,10 +64,42 @@ export interface MiniAppInitOptions {
 }
 
 export interface MiniAppShareStoryOptions {
+  /**
+   * Shared story caption. Used by Telegram directly.
+   * For VK this value is converted into a simple text sticker when `vk.stickers` is not provided.
+   */
   text?: string;
-  widgetLink?: {
+  /**
+   * Universal CTA link.
+   * Telegram maps it to `widgetLink`, VK maps it to `attachment` when custom VK attachment is not provided.
+   */
+  link?: {
     url: string;
     name?: string;
+  };
+  /**
+   * Telegram-specific options.
+   */
+  telegram?: {
+    text?: string;
+    widgetLink?: {
+      url: string;
+      name?: string;
+    };
+  };
+  /**
+   * VK-specific options.
+   */
+  vk?: {
+    backgroundType?: 'image' | 'video';
+    locked?: boolean;
+    attachment?: {
+      type: string;
+      text?: string;
+      url?: string;
+      [key: string]: unknown;
+    };
+    stickers?: Array<Record<string, unknown>>;
   };
 }
 
@@ -80,7 +112,18 @@ export type MiniAppCapability =
   | 'backButtonVisibility'
   | 'bindCssVariables'
   | 'requestPhone'
-  | 'notifications';
+  | 'notifications'
+  | 'openInternalLink'
+  | 'requestFullscreen'
+  | 'verticalSwipes'
+  | 'viewVisibility'
+  | 'shareUrl'
+  | 'shareStory'
+  | 'copyTextToClipboard'
+  | 'downloadFile'
+  | 'addToHomeScreen'
+  | 'checkHomeScreenStatus'
+  | 'denyNotifications';
 
 export interface MiniAppPopupButton {
   id: string;

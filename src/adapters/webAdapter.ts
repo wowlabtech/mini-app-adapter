@@ -1,7 +1,7 @@
 import jsQR from "jsqr";
 
 import { BaseMiniAppAdapter } from './baseAdapter';
-import type { MiniAppQrScanOptions } from '@/types/miniApp';
+import type { MiniAppCapability, MiniAppQrScanOptions } from '@/types/miniApp';
 import { triggerFileDownload } from '@/lib/download';
 
 export class WebMiniAppAdapter extends BaseMiniAppAdapter {
@@ -19,6 +19,23 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
         event.preventDefault();
         this.deferredPrompt = event as BeforeInstallPromptEvent;
       });
+    }
+  }
+
+  override supports(capability: MiniAppCapability): boolean | Promise<boolean> {
+    switch (capability) {
+      case 'copyTextToClipboard':
+        return typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.writeText);
+      case 'downloadFile':
+        return typeof document !== 'undefined';
+      case 'shareUrl':
+        return typeof navigator !== 'undefined' && (Boolean(navigator.share) || Boolean(navigator.clipboard?.writeText));
+      case 'addToHomeScreen':
+        return /android/i.test(navigator.userAgent) && Boolean(this.deferredPrompt);
+      case 'checkHomeScreenStatus':
+        return true;
+      default:
+        return super.supports(capability);
     }
   }
 

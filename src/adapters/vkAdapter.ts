@@ -179,19 +179,41 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async supports(capability: MiniAppCapability): Promise<boolean> {
-    if (capability === 'requestPhone') {
-      const [supportsPhoneNumber, supportsPersonalCard] = await Promise.all([
-        this.supportsBridgeMethod('VKWebAppGetPhoneNumber'),
-        this.supportsBridgeMethod('VKWebAppGetPersonalCard'),
-      ]);
-      return supportsPhoneNumber || supportsPersonalCard;
+    switch (capability) {
+      case 'haptics': {
+        const [impact, notification, selection] = await Promise.all([
+          this.supportsBridgeMethod('VKWebAppTapticImpactOccurred'),
+          this.supportsBridgeMethod('VKWebAppTapticNotificationOccurred'),
+          this.supportsBridgeMethod('VKWebAppTapticSelectionChanged'),
+        ]);
+        return impact || notification || selection;
+      }
+      case 'qrScanner':
+        return this.supportsBridgeMethod('VKWebAppOpenCodeReader');
+      case 'requestPhone': {
+        const [supportsPhoneNumber, supportsPersonalCard] = await Promise.all([
+          this.supportsBridgeMethod('VKWebAppGetPhoneNumber'),
+          this.supportsBridgeMethod('VKWebAppGetPersonalCard'),
+        ]);
+        return supportsPhoneNumber || supportsPersonalCard;
+      }
+      case 'notifications':
+        return this.supportsBridgeMethod('VKWebAppAllowNotifications');
+      case 'shareUrl':
+        return this.supportsBridgeMethod('VKWebAppShare');
+      case 'shareStory':
+        return this.supportsBridgeMethod('VKWebAppShowStoryBox');
+      case 'downloadFile':
+        return this.supportsBridgeMethod('VKWebAppDownloadFile');
+      case 'addToHomeScreen':
+        return this.supportsBridgeMethod('VKWebAppAddToHomeScreen');
+      case 'denyNotifications':
+        return this.supportsBridgeMethod('VKWebAppDenyNotifications');
+      case 'viewVisibility':
+        return true;
+      default:
+        return await super.supports(capability);
     }
-
-    if (capability === 'notifications') {
-      return this.supportsBridgeMethod('VKWebAppAllowNotifications');
-    }
-
-    return await super.supports(capability);
   }
 
   override async requestPhone(): Promise<string | null> {
@@ -310,11 +332,48 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async shareStory(mediaUrl: string, _options?: MiniAppShareStoryOptions): Promise<void> {
+    const options = _options;
+    const vkOptions = options?.vk;
+
+    const fallbackAttachment = options?.link
+      ? {
+        type: 'url',
+        text: 'open',
+        url: options.link.url,
+      }
+      : undefined;
+
+    const fallbackStickers = options?.text
+      ? [{
+        sticker_type: 'native',
+        sticker: {
+          action_type: 'text',
+          action: {
+            text: options.text,
+            style: 'classic',
+            background_style: 'none',
+          },
+          transform: {
+            gravity: 'center_bottom',
+            translation_y: -0.2,
+          },
+        },
+      }]
+      : undefined;
+
     const bridgeOptions: ShowStoryBoxOptions = {
-      background_type: 'image',
+      background_type: vkOptions?.backgroundType ?? 'image',
       url: mediaUrl,
+      locked: vkOptions?.locked ?? true,
+      ...((vkOptions?.attachment ?? fallbackAttachment)
+        ? { attachment: (vkOptions?.attachment ?? fallbackAttachment) as ShowStoryBoxOptions['attachment'] }
+        : {}),
+      ...((vkOptions?.stickers ?? fallbackStickers)
+        ? { stickers: (vkOptions?.stickers ?? fallbackStickers) as ShowStoryBoxOptions['stickers'] }
+        : {}),
     };
-    await bridge.send('VKWebAppShowStoryBox', bridgeOptions)
+
+    await bridge.send('VKWebAppShowStoryBox', bridgeOptions);
   }
 
   override shareUrl(url: string, text?: string): void {

@@ -118,8 +118,8 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     window.open(url, '_blank', 'noopener,noreferrer');
   }
   
-  async openInternalLink(_url: string): Promise<void> {
-
+  async openInternalLink(url: string): Promise<void> {
+    window.open(url, '_self', 'noopener,noreferrer');
   }
 
   async closeApp(): Promise<void> {

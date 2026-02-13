@@ -116,6 +116,10 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
         return Boolean(bridge?.BackButton?.onClick);
       case 'backButtonVisibility':
         return Boolean(bridge?.BackButton?.show && bridge.BackButton.hide);
+      case 'openInternalLink':
+        return typeof bridge?.openMaxLink === 'function';
+      case 'downloadFile':
+        return typeof bridge?.downloadFile === 'function';
       case 'requestPhone':
         if (!bridge) {
           return false;
@@ -177,6 +181,15 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
       return;
     }
     await super.openExternalLink(url);
+  }
+
+  override async openInternalLink(url: string): Promise<void> {
+    const bridge = getMaxBridge();
+    if (bridge?.openMaxLink) {
+      bridge.openMaxLink(url);
+      return;
+    }
+    await super.openInternalLink(url);
   }
 
   override async closeApp(): Promise<void> {

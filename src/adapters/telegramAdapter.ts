@@ -254,6 +254,34 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         return backButton.hide.isSupported();
       case 'bindCssVariables':
         return true;
+      case 'openInternalLink':
+        return true;
+      case 'requestFullscreen':
+        return Boolean(
+          (typeof rawViewport.requestFullscreen === 'function')
+          || viewport.requestFullscreen?.isAvailable?.(),
+        );
+      case 'verticalSwipes':
+        return Boolean(
+          swipeBehavior.enableVertical.isAvailable()
+          || swipeBehavior.disableVertical.isAvailable(),
+        );
+      case 'viewVisibility':
+        return true;
+      case 'shareUrl':
+        return typeof shareURLSdk === 'function';
+      case 'shareStory':
+        return typeof shareStorySdk === 'function';
+      case 'copyTextToClipboard':
+        return typeof copyTextToClipboardSdk === 'function';
+      case 'downloadFile':
+        return typeof downloadFileSdk === 'function';
+      case 'addToHomeScreen':
+        return typeof addToHomeScreenSdk?.isAvailable === 'function'
+          ? addToHomeScreenSdk.isAvailable()
+          : typeof addToHomeScreenSdk === 'function';
+      case 'checkHomeScreenStatus':
+        return typeof checkHomeScreenStatusSdk === 'function';
       case 'requestPhone': {
         return Boolean(isFeatureAvailable(requestPhoneAccess) || isFeatureAvailable(requestContact));
       }
@@ -560,7 +588,19 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async shareStory(mediaUrl: string, options?: MiniAppShareStoryOptions): Promise<void> {
-    shareStorySdk(mediaUrl, options);
+    const text = options?.telegram?.text ?? options?.text;
+    const widgetLink = options?.telegram?.widgetLink
+      ?? (options?.link
+        ? {
+          url: options.link.url,
+          ...(options.link.name ? { name: options.link.name } : {}),
+        }
+        : undefined);
+
+    shareStorySdk(mediaUrl, {
+      ...(text ? { text } : {}),
+      ...(widgetLink ? { widgetLink } : {}),
+    });
   }
 
   override async addToHomeScreen(): Promise<boolean> {
@@ -835,5 +875,4 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     this.backHandlers.clear();
     super.onDestroy();
   }
-
 }
