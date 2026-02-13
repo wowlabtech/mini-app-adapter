@@ -4,7 +4,7 @@ import type {
 } from '@tma.js/bridge';
 
 import {
-  MiniAppShareStoryOptions,
+  type MiniAppShareStoryOptions,
   type MiniAppAdapter,
   type MiniAppCapability,
   type MiniAppEnvironmentInfo,

@@ -7,6 +7,7 @@ export type {
   MiniAppQrScanOptions,
   MiniAppPlatform,
   MiniAppViewportState,
+  MiniAppShareStoryOptions,
 } from '@/types/miniApp';
 
 export {
