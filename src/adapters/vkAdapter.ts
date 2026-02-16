@@ -179,11 +179,6 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async openExternalLink(url: string): Promise<void> {
-    if (!bridge.isWebView()) {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
     const a = document.createElement('a');
     a.href = url;
     a.target = '_blank';
