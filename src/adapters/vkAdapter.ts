@@ -178,6 +178,22 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     };
   }
 
+  override async openExternalLink(url: string): Promise<void> {
+    if (!bridge.isWebView()) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   override async supports(capability: MiniAppCapability): Promise<boolean> {
     switch (capability) {
       case 'haptics': {
@@ -209,6 +225,8 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
         return this.supportsBridgeMethod('VKWebAppAddToHomeScreen');
       case 'denyNotifications':
         return this.supportsBridgeMethod('VKWebAppDenyNotifications');
+      case 'openExternalLink':
+        return true;
       case 'viewVisibility':
         return true;
       default:

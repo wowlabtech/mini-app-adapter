@@ -113,6 +113,7 @@ export type MiniAppCapability =
   | 'bindCssVariables'
   | 'requestPhone'
   | 'notifications'
+  | 'openExternalLink'
   | 'openInternalLink'
   | 'requestFullscreen'
   | 'verticalSwipes'

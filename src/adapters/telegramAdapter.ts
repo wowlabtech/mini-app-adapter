@@ -254,6 +254,8 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         return backButton.hide.isSupported();
       case 'bindCssVariables':
         return true;
+      case 'openExternalLink':
+        return isFeatureAvailable(openLink);
       case 'openInternalLink':
         return true;
       case 'requestFullscreen':

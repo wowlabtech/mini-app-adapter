@@ -51,8 +51,13 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     }
   }
 
-  supports(_capability: MiniAppCapability): boolean | Promise<boolean> {
-    return false;
+  supports(capability: MiniAppCapability): boolean | Promise<boolean> {
+    switch (capability) {
+      case 'openExternalLink':
+        return true;
+      default:
+        return false;
+    }
   }
 
   get platform(): MiniAppPlatform {
