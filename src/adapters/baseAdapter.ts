@@ -4,7 +4,7 @@ import type {
 } from '@tma.js/bridge';
 
 import {
-  type MiniAppCustomLaunchParams,
+  type MiniAppLaunchParams,
   type MiniAppShareStoryOptions,
   type MiniAppAdapter,
   type MiniAppCapability,
@@ -149,12 +149,10 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return undefined;
   }
 
-  getLaunchParams(): unknown {
-    return undefined;
-  }
-
-  getCustomLaunchParams(): MiniAppCustomLaunchParams {
-    return { customLaunchParams: {} };
+  getLaunchParams(): MiniAppLaunchParams | undefined {
+    return {
+      customLaunchParams: this.readCustomUrlParams(),
+    };
   }
 
   decodeStartParam(_param: string): unknown {
@@ -342,6 +340,45 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   protected registerDisposable(disposable: Disposable): () => void {
     return this.disposables.add(disposable);
+  }
+
+  protected readCustomUrlParams(isServiceParam?: (key: string) => boolean): Record<string, unknown> {
+    if (typeof window === 'undefined') {
+      return {};
+    }
+
+    const result: Record<string, unknown> = {};
+    const append = (source: URLSearchParams) => {
+      const keys = new Set<string>();
+      for (const [key] of source.entries()) {
+        keys.add(key);
+      }
+
+      for (const key of keys) {
+        if (isServiceParam?.(key)) {
+          continue;
+        }
+
+        const values = source.getAll(key);
+        if (!values.length) {
+          continue;
+        }
+
+        result[key] = values.length === 1 ? values[0] : values;
+      }
+    };
+
+    append(new URLSearchParams(window.location.search));
+
+    const hash = window.location.hash.startsWith('#')
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+
+    if (hash && hash.includes('=')) {
+      append(new URLSearchParams(hash));
+    }
+
+    return result;
   }
 
   private applyScrollGuards(): (() => void) | undefined {

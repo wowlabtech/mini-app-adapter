@@ -40,9 +40,9 @@ import {
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
 import type {
   MiniAppCapability,
-  MiniAppCustomLaunchParams,
   MiniAppEnvironmentInfo,
   MiniAppInitOptions,
+  MiniAppLaunchParams,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
   MiniAppShareStoryOptions,
@@ -386,15 +386,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  override getLaunchParams(): unknown {
-    try {
-      return retrieveLaunchParams();
-    } catch {
-      return undefined;
-    }
-  }
-
-  override getCustomLaunchParams(): MiniAppCustomLaunchParams {
+  override getLaunchParams(): MiniAppLaunchParams | undefined {
     const customFromUrl = this.readCustomUrlParams((key) => key.toLowerCase().startsWith('tgwebapp'));
     let customFromStartParam: Record<string, unknown> = {};
 
@@ -404,16 +396,22 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       if (typeof startParam === 'string' && startParam) {
         customFromStartParam = this.normalizeDecodedStartParam(startParam);
       }
-    } catch {
-      // Ignore unsupported environments.
-    }
 
-    return {
-      customLaunchParams: {
-        ...customFromUrl,
-        ...customFromStartParam,
-      },
-    };
+      return {
+        launchParams,
+        customLaunchParams: {
+          ...customFromUrl,
+          ...customFromStartParam,
+        },
+      };
+    } catch {
+      return {
+        customLaunchParams: {
+          ...customFromUrl,
+          ...customFromStartParam,
+        },
+      };
+    }
   }
 
   override decodeStartParam(param: string): unknown {
@@ -901,45 +899,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
 
     return {};
-  }
-
-  private readCustomUrlParams(isServiceParam: (key: string) => boolean): Record<string, unknown> {
-    if (typeof window === 'undefined') {
-      return {};
-    }
-
-    const result: Record<string, unknown> = {};
-    const append = (source: URLSearchParams) => {
-      const keys = new Set<string>();
-      for (const [key] of source.entries()) {
-        keys.add(key);
-      }
-
-      for (const key of keys) {
-        if (isServiceParam(key)) {
-          continue;
-        }
-
-        const values = source.getAll(key);
-        if (!values.length) {
-          continue;
-        }
-
-        result[key] = values.length === 1 ? values[0] : values;
-      }
-    };
-
-    append(new URLSearchParams(window.location.search));
-
-    const hash = window.location.hash.startsWith('#')
-      ? window.location.hash.slice(1)
-      : window.location.hash;
-
-    if (hash && hash.includes('=')) {
-      append(new URLSearchParams(hash));
-    }
-
-    return result;
   }
 
   private parseQueryString(value: string): Record<string, unknown> {

@@ -1,6 +1,6 @@
 {
   "name": "@wowlabtech/mini-app-adapter",
-  "version": "0.2.8",
+  "version": "0.2.82",
   "description": "Cross-platform adapter toolkit for Telegram, VK, and MAX mini apps.",
   "type": "module",
   "private": false,

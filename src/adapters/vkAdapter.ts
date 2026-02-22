@@ -18,9 +18,9 @@ import { getVkPixelCode } from '@/config/vkAnalytics';
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
 import type {
   MiniAppCapability,
-  MiniAppCustomLaunchParams,
   MiniAppEnvironmentInfo,
   MiniAppInitOptions,
+  MiniAppLaunchParams,
   MiniAppQrScanOptions,
   MiniAppShareStoryOptions,
 } from '@/types/miniApp';
@@ -168,20 +168,25 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     };
   }
 
-  override getLaunchParams(): unknown {
+  override getLaunchParams(): MiniAppLaunchParams | undefined {
     if (!this.launchParams) {
-      return undefined;
+      return {
+        customLaunchParams: this.readCustomUrlParams((key) => {
+          const normalized = key.toLowerCase();
+          return normalized.startsWith('vk_') || normalized === 'sign';
+        }),
+      };
     }
 
     return {
-      launchParams: this.launchParams,
-      queryParams: this.queryParams,
-    };
-  }
-
-  override getCustomLaunchParams(): MiniAppCustomLaunchParams {
-    return {
-      customLaunchParams: this.readCustomUrlParams(),
+      launchParams: {
+        bridge: this.launchParams,
+        query: this.queryParams,
+      },
+      customLaunchParams: this.readCustomUrlParams((key) => {
+        const normalized = key.toLowerCase();
+        return normalized.startsWith('vk_') || normalized === 'sign';
+      }),
     };
   }
 
@@ -194,49 +199,6 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     document.body.appendChild(a);
     a.click();
     a.remove();
-  }
-
-  private readCustomUrlParams(): Record<string, unknown> {
-    if (typeof window === 'undefined') {
-      return {};
-    }
-
-    const result: Record<string, unknown> = {};
-    const isServiceParam = (key: string): boolean => {
-      const normalized = key.toLowerCase();
-      return normalized.startsWith('vk_') || normalized === 'sign';
-    };
-
-    const append = (source: URLSearchParams) => {
-      const keys = new Set<string>();
-      for (const [key] of source.entries()) {
-        keys.add(key);
-      }
-
-      for (const key of keys) {
-        if (isServiceParam(key)) {
-          continue;
-        }
-
-        const values = source.getAll(key);
-        if (!values.length) {
-          continue;
-        }
-
-        result[key] = values.length === 1 ? values[0] : values;
-      }
-    };
-
-    append(new URLSearchParams(window.location.search));
-
-    const hash = window.location.hash.startsWith('#')
-      ? window.location.hash.slice(1)
-      : window.location.hash;
-    if (hash && hash.includes('=')) {
-      append(new URLSearchParams(hash));
-    }
-
-    return result;
   }
 
   override async supports(capability: MiniAppCapability): Promise<boolean> {

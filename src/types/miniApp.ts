@@ -48,7 +48,8 @@ export interface MiniAppViewportState {
   stableHeight: number;
 }
 
-export interface MiniAppCustomLaunchParams {
+export interface MiniAppLaunchParams {
+  launchParams?: unknown;
   customLaunchParams: Record<string, unknown>;
 }
 
@@ -227,12 +228,7 @@ export interface MiniAppAdapter {
   /**
    * Reads platform launch parameters, if available.
    */
-  getLaunchParams?(): unknown;
-
-  /**
-   * Returns custom launch parameters that are not part of platform service fields.
-   */
-  getCustomLaunchParams(): MiniAppCustomLaunchParams;
+  getLaunchParams?(): MiniAppLaunchParams | undefined;
 
   /**
    * Decodes platform specific start parameter.

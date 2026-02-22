@@ -8,6 +8,7 @@ import type {
   MiniAppCapability,
   MiniAppEnvironmentInfo,
   MiniAppInitOptions,
+  MiniAppLaunchParams,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
 } from '@/types/miniApp';
@@ -136,8 +137,11 @@ export class MaxMiniAppAdapter extends BaseMiniAppAdapter {
     return this.initData;
   }
 
-  override getLaunchParams(): unknown {
-    return this.initDataUnsafe ?? undefined;
+  override getLaunchParams(): MiniAppLaunchParams | undefined {
+    return {
+      launchParams: this.initDataUnsafe,
+      customLaunchParams: this.readCustomUrlParams(),
+    };
   }
 
   override onBackButton(callback: () => void): () => void {
