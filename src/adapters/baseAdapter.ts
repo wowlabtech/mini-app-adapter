@@ -4,6 +4,7 @@ import type {
 } from '@tma.js/bridge';
 
 import {
+  type MiniAppCustomLaunchParams,
   type MiniAppShareStoryOptions,
   type MiniAppAdapter,
   type MiniAppCapability,
@@ -150,6 +151,10 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
 
   getLaunchParams(): unknown {
     return undefined;
+  }
+
+  getCustomLaunchParams(): MiniAppCustomLaunchParams {
+    return { customLaunchParams: {} };
   }
 
   decodeStartParam(_param: string): unknown {

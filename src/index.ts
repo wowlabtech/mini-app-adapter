@@ -3,6 +3,7 @@ export type {
   MiniAppCapability,
   MiniAppEnvironmentInfo,
   MiniAppInitOptions,
+  MiniAppCustomLaunchParams,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
   MiniAppPlatform,
