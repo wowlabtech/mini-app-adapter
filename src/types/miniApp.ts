@@ -49,7 +49,7 @@ export interface MiniAppViewportState {
 }
 
 export interface MiniAppLaunchParams {
-  launchParams?: unknown;
+  launchParams?: Record<string, unknown>;
   customLaunchParams: Record<string, unknown>;
 }
 

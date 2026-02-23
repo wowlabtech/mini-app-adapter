@@ -179,10 +179,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     }
 
     return {
-      launchParams: {
-        bridge: this.launchParams,
-        query: this.queryParams,
-      },
+      launchParams: this.launchParams,
       customLaunchParams: this.readCustomUrlParams((key) => {
         const normalized = key.toLowerCase();
         return normalized.startsWith('vk_') || normalized === 'sign';
