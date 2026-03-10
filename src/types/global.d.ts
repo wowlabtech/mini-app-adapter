@@ -67,6 +67,10 @@ interface MaxWebApp {
 interface Window {
   Telegram?: TelegramSDK;
   WebApp?: MaxWebApp;
+  eruda?: {
+    init(): void;
+    position(coords: { x: number; y: number }): void;
+  };
   NativeBridge?: {
     postMessage(message: {
       type: 'storeToken' | 'requestPushPermission' | 'openNativeQR';
@@ -79,12 +83,4 @@ interface Window {
   nativeQRResult?: (value: string) => void;
   nativeAppActive?: () => void;
   nativeAppBackground?: () => void;
-}
-
-declare module 'eruda' {
-  const eruda: {
-    init(): void;
-    position(coords: { x: number; y: number }): void;
-  };
-  export default eruda;
 }

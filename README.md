@@ -52,7 +52,7 @@ bootstrap();
 import { createAdapter } from '@wowlabtech/mini-app-adapter';
 
 const adapter = createAdapter('telegram');
-await adapter.init({ eruda: true });
+await adapter.init({ eruda: true }); // сработает, только если host заранее положил eruda в window.eruda
 
 adapter.setColors({ header: '#0a0a0a', background: '#ffffff' });
 adapter.onBackButton(() => adapter.closeApp());

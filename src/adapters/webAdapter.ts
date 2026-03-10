@@ -92,6 +92,9 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       overlay.style.flexDirection = "column";
       overlay.style.alignItems = "center";
       overlay.style.justifyContent = "center";
+      overlay.style.gap = "20px";
+      overlay.style.padding = "24px";
+      overlay.style.boxSizing = "border-box";
       overlay.style.overflow = "hidden"; 
       overlay.style.backdropFilter = "blur(3px)";
       document.body.appendChild(overlay);
@@ -188,10 +191,24 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       const hint = document.createElement("div");
       hint.innerText = "Наведите камеру на QR-код";
       hint.style.color = "white";
-      hint.style.marginTop = "30px";
       hint.style.fontSize = "17px";
       hint.style.opacity = "0.9";
       overlay.appendChild(hint);
+
+      const bottomCloseBtn = document.createElement("button");
+      bottomCloseBtn.innerText = "Закрыть";
+      bottomCloseBtn.style.minWidth = `${Math.min(scanSize, 220)}px`;
+      bottomCloseBtn.style.height = "48px";
+      bottomCloseBtn.style.padding = "0 20px";
+      bottomCloseBtn.style.border = "1px solid rgba(255,255,255,0.24)";
+      bottomCloseBtn.style.borderRadius = "14px";
+      bottomCloseBtn.style.background = "rgba(255,255,255,0.12)";
+      bottomCloseBtn.style.color = "white";
+      bottomCloseBtn.style.fontSize = "16px";
+      bottomCloseBtn.style.fontWeight = "600";
+      bottomCloseBtn.style.cursor = "pointer";
+      bottomCloseBtn.style.backdropFilter = "blur(8px)";
+      overlay.appendChild(bottomCloseBtn);
 
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -236,14 +253,30 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       };
 
       closeBtn.onclick = () => closeScanner(null);
+      bottomCloseBtn.onclick = () => closeScanner(null);
 
       // ===============================================
       //  START CAM
       // ===============================================
       try {
         const constraints: MediaStreamConstraints[] = [
-          { video: { facingMode: { ideal: "environment" } }, audio: false },
-          { video: { facingMode: "environment" }, audio: false },
+          {
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              aspectRatio: { ideal: 1.7777777778 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: "environment",
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
           { video: true, audio: false },
         ];
 
@@ -261,6 +294,22 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
           throw lastError instanceof Error ? lastError : new Error("Unable to access camera");
         }
 
+        const [videoTrack] = stream.getVideoTracks();
+        if (videoTrack) {
+          try {
+            const advancedConstraints = [
+              { focusMode: "continuous" },
+              { exposureMode: "continuous" },
+              { whiteBalanceMode: "continuous" },
+            ] as unknown as MediaTrackConstraintSet[];
+            await videoTrack.applyConstraints({
+              advanced: advancedConstraints,
+            });
+          } catch {
+            // Ignore unsupported advanced camera constraints.
+          }
+        }
+
         video.srcObject = stream;
         await video.play();
 
@@ -268,7 +317,7 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
           if (closed) {
             return;
           }
-          if (now - lastScanAt >= 100 && context && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          if (now - lastScanAt >= 80 && context && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
             const width = video.videoWidth;
             const height = video.videoHeight;
             if (width > 0 && height > 0) {

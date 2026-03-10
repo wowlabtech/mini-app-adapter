@@ -8,6 +8,6 @@ export default defineConfig({
   sourcemap: true,
   minify: false,
   target: 'es2020',
-  external: ['react', 'react-dom', 'eruda'],
+  external: ['react', 'react-dom'],
   tsconfig: './tsconfig.json',
 });

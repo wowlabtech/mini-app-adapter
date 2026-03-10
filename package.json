@@ -1,6 +1,6 @@
 {
   "name": "@wowlabtech/mini-app-adapter",
-  "version": "0.2.83",
+  "version": "0.2.84",
   "description": "Cross-platform adapter toolkit for Telegram, VK, and MAX mini apps.",
   "type": "module",
   "private": false,
@@ -31,7 +31,6 @@
     "@tma.js/sdk": "^3.1.2",
     "@tma.js/sdk-react": "^3.0.11",
     "@vkontakte/vk-bridge": "^2.10.0",
-    "eruda": "^3.4.3",
     "html5-qrcode": "^2.3.8",
     "jsqr": "^1.4.0"
   },

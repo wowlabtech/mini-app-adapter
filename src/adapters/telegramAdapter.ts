@@ -81,11 +81,9 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       console.warn('[tvm-app-adapter] miniApp feature is not supported; falling back to limited mode.');
     }
 
-    if (eruda) {
-      void import('eruda').then(({ default: erudaInstance }) => {
-        erudaInstance.init();
-        erudaInstance.position({ x: window.innerWidth - 150, y: window.innerHeight - 150 });
-      });
+    if (eruda && typeof window !== 'undefined' && window.eruda) {
+      window.eruda.init();
+      window.eruda.position({ x: window.innerWidth - 150, y: window.innerHeight - 150 });
     }
 
     if (mockForMacOS) {
