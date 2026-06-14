@@ -3,7 +3,7 @@ import { useMiniAppAdapter } from '@/components/AdapterProvider';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
-const STORAGE_KEY = 'loyalka-theme-preference';
+const STORAGE_KEY = 'mini-app-adapter:theme-preference';
 
 export function useAdapterTheme() {
   const adapter = useMiniAppAdapter();
@@ -62,7 +62,20 @@ export function useAdapterTheme() {
     } else {
       root.classList.remove('dark');
     }
-  }, [isDark]);
+
+    // Read the CSS variables AFTER the theme class is applied so the native
+    // header/background colors reflect the current theme (not the previous one).
+    const styles = getComputedStyle(root);
+    const primaryColor = styles.getPropertyValue('--primary').trim();
+    const backgroundColor = styles.getPropertyValue('--background').trim();
+
+    if (primaryColor || backgroundColor) {
+      void adapter.setColors({
+        ...(primaryColor ? { header: primaryColor } : {}),
+        ...(backgroundColor ? { background: backgroundColor, footer: backgroundColor } : {}),
+      });
+    }
+  }, [isDark, adapter]);
 
   const setPreference = useCallback((pref: ThemePreference) => {
     setPreferenceState(pref);
@@ -79,18 +92,9 @@ export function useAdapterTheme() {
       }, 400);
     }, 50);
 
-    const root = document.documentElement;
-    const styles = getComputedStyle(root);
-    const primaryColor = styles.getPropertyValue('--primary').trim();
-    const backgroundColor = styles.getPropertyValue('--background').trim();
-
-    adapter.setColors({
-      header: primaryColor,
-      background: backgroundColor,
-      footer: backgroundColor,
-    });
+    // Native colors are synced by the isDark effect once the theme actually flips.
     setPreference(preference === 'dark' ? 'light' : 'dark');
-  }, [adapter, preference, setPreference]);
+  }, [preference, setPreference]);
 
   return {
     isDark,

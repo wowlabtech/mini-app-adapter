@@ -89,20 +89,16 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
         console.warn('[tvm-app-adapter] VKWebAppInit returned result=false.');
       }
     } catch (error) {
-      console.error('[tvm-app-adapter] VKWebAppInit failed:', error);
-      this.unsubscribe?.();
-      this.unsubscribe = undefined;
-      throw error;
+      // Degrade gracefully instead of throwing: a failed init must not blow up the
+      // host app's bootstrap (consumers commonly `await adapter.init()` without a catch).
+      console.warn('[tvm-app-adapter] VKWebAppInit failed:', error);
     }
 
-    let launchParams: GetLaunchParamsResponse;
+    let launchParams: GetLaunchParamsResponse | undefined;
     try {
       launchParams = await bridge.send('VKWebAppGetLaunchParams');
     } catch (error) {
-      console.error('[tvm-app-adapter] VKWebAppGetLaunchParams failed:', error);
-      this.unsubscribe?.();
-      this.unsubscribe = undefined;
-      throw error;
+      console.warn('[tvm-app-adapter] VKWebAppGetLaunchParams failed; falling back to URL params:', error);
     }
 
     const search = typeof window !== 'undefined' ? window.location.search : '';
@@ -198,6 +194,21 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     a.remove();
   }
 
+  override async closeApp(): Promise<void> {
+    const supported = await this.supportsBridgeMethod('VKWebAppClose');
+    if (!supported) {
+      await super.closeApp();
+      return;
+    }
+
+    try {
+      await bridge.send('VKWebAppClose', { status: 'success' });
+    } catch (error) {
+      console.warn('[tvm-app-adapter] VK closeApp failed:', error);
+      await super.closeApp();
+    }
+  }
+
   override async supports(capability: MiniAppCapability): Promise<boolean> {
     switch (capability) {
       case 'haptics': {
@@ -229,6 +240,8 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
         return this.supportsBridgeMethod('VKWebAppAddToHomeScreen');
       case 'denyNotifications':
         return this.supportsBridgeMethod('VKWebAppDenyNotifications');
+      case 'closeApp':
+        return this.supportsBridgeMethod('VKWebAppClose');
       case 'openExternalLink':
         return true;
       case 'viewVisibility':
@@ -325,18 +338,13 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       return super.scanQRCode(options);
     }
 
-    let result: string | null = null;
-
     try {
-      const data = await bridge.send('VKWebAppOpenCodeReader')
-      if (data.code_data) {
-        result = data.code_data;
-      }
+      const data = await bridge.send('VKWebAppOpenCodeReader');
+      return data.code_data ? data.code_data : null;
     } catch (error) {
-      console.log(error);
+      console.warn('[tvm-app-adapter] VK scanQRCode failed:', error);
+      return super.scanQRCode(options);
     }
-
-    return result;
   }
 
   override onViewHide(callback: () => void): () => void {
@@ -572,13 +580,13 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   private composeEnvironment(
-    launchParams: GetLaunchParamsResponse,
+    launchParams: GetLaunchParamsResponse | undefined,
     queryParams: ReturnType<typeof parseURLSearchParamsForGetLaunchParams>,
     config?: ParentConfigData,
   ): MiniAppEnvironmentInfo {
-    const language = queryParams.vk_language ?? launchParams.vk_language;
-    const platform = queryParams.vk_platform ?? launchParams.vk_platform;
-    const appId = queryParams.vk_app_id ?? launchParams.vk_app_id;
+    const language = queryParams.vk_language ?? launchParams?.vk_language;
+    const platform = queryParams.vk_platform ?? launchParams?.vk_platform;
+    const appId = queryParams.vk_app_id ?? launchParams?.vk_app_id;
     const prefersDark = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
       : false;

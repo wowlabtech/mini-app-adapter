@@ -22,7 +22,7 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  override supports(capability: MiniAppCapability): boolean | Promise<boolean> {
+  override async supports(capability: MiniAppCapability): Promise<boolean> {
     switch (capability) {
       case 'copyTextToClipboard':
         return typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.writeText);
@@ -345,7 +345,7 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       }
     });
   }
-  shareUrl(url: string, text: string): void {
+  shareUrl(url: string, text?: string): void {
     if (navigator.share) {
       try {
         navigator.share({ title: text, text, url });

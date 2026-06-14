@@ -24,7 +24,6 @@ import {
   decodeStartParam,
   closingBehavior,
   requestContact,
-  requestPhoneAccess,
   swipeBehavior,
   viewport as rawViewport,
   shareURL as shareURLSdk,
@@ -145,6 +144,10 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     this.setupAppearanceWatcher();
     this.setupActiveWatcher();
 
+    // Push safe-area / viewport changes (fullscreen, orientation, keyboard) to
+    // environment subscribers so useSafeArea recomputes beyond plain window resizes.
+    this.registerDisposable(this.onViewportChange(() => this.notifyEnvironmentChanged()));
+
     this.ready = true;
   }
 
@@ -226,7 +229,13 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async openInternalLink(url: string): Promise<void> {
-    postEvent('web_app_open_tg_link', { path_full: url });
+    try {
+      postEvent('web_app_open_tg_link', { path_full: url });
+      return;
+    } catch (error) {
+      console.warn('[tvm-app-adapter] Telegram openInternalLink failed:', error);
+    }
+    await super.openInternalLink(url);
   }
 
   enableDebug(state: boolean): void {
@@ -237,10 +246,14 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  override supports(capability: MiniAppCapability): boolean {
+  private hapticsAvailable(): boolean {
+    return isFeatureAvailable(hapticFeedback.selectionChanged);
+  }
+
+  override async supports(capability: MiniAppCapability): Promise<boolean> {
     switch (capability) {
       case 'haptics':
-        return isFeatureAvailable(hapticFeedback.selectionChanged);
+        return this.hapticsAvailable();
       case 'popup':
         return isFeatureAvailable(popup.show);
       case 'qrScanner':
@@ -283,9 +296,8 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
           : typeof addToHomeScreenSdk === 'function';
       case 'checkHomeScreenStatus':
         return typeof checkHomeScreenStatusSdk === 'function';
-      case 'requestPhone': {
-        return Boolean(isFeatureAvailable(requestPhoneAccess) || isFeatureAvailable(requestContact));
-      }
+      case 'requestPhone':
+        return isFeatureAvailable(requestContact);
       default:
         return false;
     }
@@ -309,19 +321,19 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override vibrateImpact(style: ImpactHapticFeedbackStyle): void {
-    if (this.supports('haptics')) {
+    if (this.hapticsAvailable()) {
       hapticFeedback.impactOccurred(style);
     }
   }
 
   override vibrateNotification(type: NotificationHapticFeedbackType): void {
-    if (this.supports('haptics')) {
+    if (this.hapticsAvailable()) {
       hapticFeedback.notificationOccurred(type);
     }
   }
 
   override vibrateSelection(): void {
-    if (this.supports('haptics')) {
+    if (this.hapticsAvailable()) {
       hapticFeedback.selectionChanged();
     }
   }
@@ -679,24 +691,16 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async requestPhone(): Promise<string | null> {
-    const contactFeature = ensureFeature(requestContact);
-    if (!contactFeature.ok) {
+    // `isFeatureAvailable` only probes availability; unlike `ensureFeature` it does NOT
+    // invoke the feature, so the native prompt is shown exactly once below.
+    if (!isFeatureAvailable(requestContact)) {
       return super.requestPhone();
     }
 
-    if (requestPhoneAccess) {
-      const accessFeature = ensureFeature(requestPhoneAccess);
-      if (accessFeature.ok) {
-        try {
-          await accessFeature.value;
-        } catch (error) {
-          console.warn('[tvm-app-adapter] Telegram requestPhone access failed:', error);
-        }
-      }
-    }
-
     try {
-      const result = await contactFeature.value;
+      // `requestContact` already drives the phone-access consent flow in tma.js v3.
+      // Calling `requestPhoneAccess` in addition would pop a second native dialog.
+      const result = await requestContact();
       if (!result || typeof result !== 'object') {
         return null;
       }

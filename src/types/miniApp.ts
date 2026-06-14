@@ -156,8 +156,10 @@ export interface MiniAppAdapter {
 
   /**
    * Quick capability check before calling platform specific APIs.
+   * Always asynchronous so callers can rely on a single contract across platforms
+   * (VK resolves capabilities via the async bridge). Always `await` the result.
    */
-  supports(capability: MiniAppCapability): boolean | Promise<boolean>;
+  supports(capability: MiniAppCapability): Promise<boolean>;
 
   /**
    * Initializes platform SDK. Safe to call multiple times.
@@ -263,9 +265,9 @@ export interface MiniAppAdapter {
   /**
    * Strong/weak haptic feedback helpers.
    */
-  vibrateImpact(style: ImpactHapticFeedbackStyle): void;
-  vibrateNotification(type: NotificationHapticFeedbackType): void;
-  vibrateSelection(): void;
+  vibrateImpact(style: ImpactHapticFeedbackStyle): void | Promise<void>;
+  vibrateNotification(type: NotificationHapticFeedbackType): void | Promise<void>;
+  vibrateSelection(): void | Promise<void>;
 
   /**
    * Notifies when the host view goes to background/foreground (VK only).
@@ -342,7 +344,7 @@ export interface MiniAppAdapter {
   /**
    * Shares a URL using platform-specific capabilities.
    */
-  shareUrl?(url: string, text: string): void;
+  shareUrl?(url: string, text?: string): void;
 
   /**
    * Copies text to the clipboard if supported by the platform.

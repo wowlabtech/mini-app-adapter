@@ -1,6 +1,5 @@
 import type { MiniAppAdapter } from '@/types/miniApp';
 import { getActiveAdapter } from '@/registry';
-import { getPlatform } from './platform';
 import { getVkPixelCode as readVkPixelCode, setVkPixelCode } from '@/config/vkAnalytics';
 
 type AnalyticsPayload = Record<string, unknown>;
@@ -25,13 +24,5 @@ export function trackPixelEvent(event: string, payload?: Record<string, unknown>
 
 function resolveVkAdapter(): MiniAppAdapter | null {
   const adapter = getActiveAdapter();
-  if (adapter) {
-    return adapter.platform === 'vk' ? adapter : null;
-  }
-
-  if (getPlatform() !== 'vk') {
-    return null;
-  }
-
-  return null;
+  return adapter && adapter.platform === 'vk' ? adapter : null;
 }

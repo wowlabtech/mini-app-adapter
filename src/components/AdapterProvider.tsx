@@ -12,28 +12,34 @@ interface AdapterProviderProps {
 
 export function AdapterProvider({ adapter, children }: AdapterProviderProps) {
   const proxiedAdapter = useMemo(() => {
+    // Cache bound methods so the proxy returns a stable reference per property.
+    // Without this every access (adapter.foo) produces a new bound function,
+    // breaking referential equality and leaking allocations.
+    const boundCache = new Map<PropertyKey, unknown>();
     return new Proxy(adapter, {
       get(target, prop, receiver) {
         const value = Reflect.get(target, prop, receiver);
-        if (typeof value === 'function') {
-          return value.bind(target);
+        if (typeof value !== 'function') {
+          return value;
         }
-        return value;
+        let bound = boundCache.get(prop);
+        if (!bound) {
+          bound = (value as (...args: unknown[]) => unknown).bind(target);
+          boundCache.set(prop, bound);
+        }
+        return bound;
       },
     }) as MiniAppAdapter;
   }, [adapter]);
 
   useEffect(() => {
     setActiveAdapter(proxiedAdapter);
+    // The adapter lifecycle is owned by whoever created it (it usually lives for
+    // the whole page). We only attach/detach it from the registry here. Calling
+    // destroy() on unmount would tear the adapter down on a StrictMode double-mount
+    // or any provider remount and leave a dead, non-reinitialized instance behind.
     return () => {
       setActiveAdapter(null);
-      if (typeof proxiedAdapter.destroy === 'function') {
-        try {
-          proxiedAdapter.destroy();
-        } catch (error) {
-          console.warn('[tvm-app-adapter] adapter destroy failed:', error);
-        }
-      }
     };
   }, [proxiedAdapter]);
 

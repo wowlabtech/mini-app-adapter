@@ -16,10 +16,6 @@ export {
 } from '@/adapters/baseAdapter';
 
 export {
-  MaxMiniAppAdapter,
-} from '@/adapters/maxAdapter';
-
-export {
   ShellMiniAppAdapter,
 } from '@/adapters/shellAdapter';
 

@@ -12,7 +12,7 @@ export class ShellMiniAppAdapter extends BaseMiniAppAdapter {
     });
   }
 
-  override supports(capability: MiniAppCapability): boolean | Promise<boolean> {
+  override async supports(capability: MiniAppCapability): Promise<boolean> {
     switch (capability) {
       case 'qrScanner':
         return true;

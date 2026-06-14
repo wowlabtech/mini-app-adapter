@@ -35,7 +35,7 @@ export function ensureFeature<T extends (...args: any[]) => unknown>(
   }
 
   try {
-    const value = (feature as T)(...args);
+    const value = (feature as T)(...args) as ReturnType<T>;
     return { ok: true, value };
   } catch (error) {
     console.warn('[tvm-app-adapter] feature call failed:', error);

@@ -52,7 +52,7 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     }
   }
 
-  supports(capability: MiniAppCapability): boolean | Promise<boolean> {
+  async supports(capability: MiniAppCapability): Promise<boolean> {
     switch (capability) {
       case 'openExternalLink':
         return true;
@@ -129,11 +129,7 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
   }
 
   async closeApp(): Promise<void> {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      window.close();
-    }
+    // No-op by default.
   }
 
   setBackButtonVisibility(_visible: boolean): void {
@@ -197,7 +193,7 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return Promise.resolve();
   }
 
-  shareUrl(_url: string, _text: string): void {
+  shareUrl(_url: string, _text?: string): void {
     // No-op by default.
   }
 
