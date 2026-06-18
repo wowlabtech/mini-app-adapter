@@ -13,6 +13,7 @@ import bridge, {
   type ParentConfigData,
   type VKBridgeSubscribeHandler,
 } from '@vkontakte/vk-bridge';
+import type { ImpactHapticFeedbackStyle } from '@tma.js/bridge';
 
 import { getVkPixelCode } from '@/config/vkAnalytics';
 import { BaseMiniAppAdapter } from '@/adapters/baseAdapter';
@@ -117,9 +118,11 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     this.startViewportTracking();
   }
 
-  override async vibrateImpact(style: TapticVibrationPowerType): Promise<void> {
+  override async vibrateImpact(style: ImpactHapticFeedbackStyle): Promise<void> {
     if (await this.supportsBridgeMethod('VKWebAppTapticImpactOccurred')) {
-      bridge.send('VKWebAppTapticImpactOccurred', { style });
+      const vkStyle: TapticVibrationPowerType =
+        style === 'light' || style === 'medium' || style === 'heavy' ? style : 'medium';
+      bridge.send('VKWebAppTapticImpactOccurred', { style: vkStyle });
     }
   }
 
