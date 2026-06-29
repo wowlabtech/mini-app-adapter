@@ -16,6 +16,7 @@ import {
   qrScanner,
   postEvent,
   retrieveLaunchParams,
+  retrieveRawLaunchParams,
   setDebug,
   themeParams,
   viewport,
@@ -71,7 +72,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
     const debug = Boolean(options?.debug);
     const eruda = Boolean(options?.eruda);
-    const mockForMacOS = Boolean(options?.mockForMacOS);
 
     setDebug(debug);
     initSDK();
@@ -85,9 +85,33 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       window.eruda.position({ x: window.innerWidth - 150, y: window.innerHeight - 150 });
     }
 
-    if (mockForMacOS) {
+    // Read the real launch parameters in their raw form BEFORE mocking. Two reasons:
+    //  1. We need them to decide whether this is the macOS client (catch-22: the host
+    //     app can't reliably tell us via `mockForMacOS` because its own
+    //     `getLaunchParams()` may have already failed on macOS).
+    //  2. `mockTelegramEnv` persists the passed `launchParams` to storage so the SDK
+    //     can retrieve them afterwards. If we mock WITHOUT seeding, the subsequent
+    //     `retrieveLaunchParams()` reads from the now-empty mock storage and throws
+    //     `LaunchParamsRetrieveError` — this is exactly what broke auth on the native
+    //     Telegram for macOS client while Windows/mobile kept working.
+    let rawLaunchParams: string | undefined;
+    try {
+      rawLaunchParams = retrieveRawLaunchParams();
+    } catch {
+      rawLaunchParams = undefined;
+    }
+
+    // Only mock when we actually have params to seed the mock with; an unseeded mock
+    // is strictly worse than no mock (see reason #2 above).
+    const shouldMockMacOS =
+      (options?.mockForMacOS ?? this.isMacOsClient(rawLaunchParams)) && Boolean(rawLaunchParams);
+
+    if (shouldMockMacOS) {
       let firstThemeSent = false;
       mockTelegramEnv({
+        // Raw format keeps `tgWebAppData` intact, which the SDK requires to retrieve
+        // init data later (see mockTelegramEnv docs).
+        launchParams: rawLaunchParams,
         onEvent(event, next) {
           if (event.name === 'web_app_request_theme') {
             let tp: Record<string, string | undefined> = {};
@@ -102,6 +126,12 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
           if (event.name === 'web_app_request_safe_area') {
             return emitEvent('safe_area_changed', { left: 0, top: 0, right: 0, bottom: 0 });
+          }
+
+          // Newer clients also request the content safe area; the macOS client never
+          // answers it, leaving viewport mount hanging. Reply with zero insets too.
+          if (event.name === 'web_app_request_content_safe_area') {
+            return emitEvent('content_safe_area_changed', { left: 0, top: 0, right: 0, bottom: 0 });
           }
 
           next();
@@ -877,6 +907,29 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         console.warn('[tvm-app-adapter] onViewHide listener failed:', error);
       }
     }
+  }
+
+  // Detects the native Telegram for macOS client, which mishandles Mini Apps method
+  // calls. Prefers `tgWebAppPlatform` from the raw launch params and falls back to the
+  // user agent for the case where launch params couldn't be retrieved at all.
+  private isMacOsClient(rawLaunchParams?: string): boolean {
+    if (rawLaunchParams) {
+      try {
+        const platform = new URLSearchParams(rawLaunchParams).get('tgWebAppPlatform');
+        if (platform) {
+          return platform === 'macos';
+        }
+      } catch {
+        // Fall through to the user-agent heuristic.
+      }
+    }
+
+    if (typeof navigator === 'undefined') {
+      return false;
+    }
+
+    const userAgent = navigator.userAgent;
+    return /Mac OS X|Macintosh/.test(userAgent) && !/(iPhone|iPad|iPod)/.test(userAgent);
   }
 
   private normalizeDecodedStartParam(startParam: string): Record<string, unknown> {
