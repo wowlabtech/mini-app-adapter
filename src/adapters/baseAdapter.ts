@@ -164,11 +164,16 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
       return () => {};
     }
 
-    const fallbackHeight = () => window.visualViewport?.height ?? window.innerHeight;
+    // `height` is the *visual* viewport (shrinks when the on-screen keyboard
+    // overlays the page); `stableHeight` is the keyboard-free layout viewport.
+    // Reporting them as equal — as this did before — hid the keyboard from every
+    // consumer that derives its height from `stableHeight - height`.
+    const visualHeight = () => window.visualViewport?.height ?? window.innerHeight;
 
     const notify = () => {
-      const height = fallbackHeight();
-      callback({ height, stableHeight: height });
+      const height = visualHeight();
+      const stableHeight = Math.max(window.innerHeight || 0, height);
+      callback({ height, stableHeight });
     };
 
     notify();
