@@ -34,23 +34,28 @@ export function detectPlatform(): MiniAppPlatform {
   const hasParam = (...names: string[]): boolean => names.some((name) => getParam(name));
   const getPlatformStorages = (): Storage[] => {
     const storages: Storage[] = [];
-    // sessionStorage survives reloads of the same webview; localStorage survives
-    // the host re-creating the webview after a long background. We persist to both
-    // and never expire so a confirmed non-web platform (e.g. VK) can't silently
-    // degrade to the web fallback when launch params / UA signals are gone.
-    try {
-      if (window.localStorage) {
-        storages.push(window.localStorage);
-      }
-    } catch {
-      // Ignore storage access errors (private mode, blocked cookies, etc.).
-    }
+    // Persist the confirmed platform to sessionStorage ONLY (never localStorage).
+    //
+    // Why we cache at all: VK-web (iframe on vk.com) and Telegram-web expose their
+    // platform solely via launch params in the first URL. react-router strips those
+    // params on the first navigation, after which no live signal remains — without a
+    // cache the adapter would silently degrade to the `web` fallback mid-session.
+    //
+    // Why session-scoped: sessionStorage is exactly "this webview/tab session" — it
+    // survives SPA navigation and full reloads of the same webview, so the VK-web
+    // case stays fixed. But it is cleared when the tab/webview is closed, so a brand
+    // browser session can't inherit a stale platform. localStorage was cross-session
+    // and never expired, which permanently branded standalone browsers as `telegram`
+    // after a single deep-link that carried tgWebApp params — breaking auth there.
+    //
+    // A killed/relaunched webview loses sessionStorage, but the host always relaunches
+    // the mini app with fresh launch params in the URL, so detection re-runs cleanly.
     try {
       if (window.sessionStorage) {
         storages.push(window.sessionStorage);
       }
     } catch {
-      // Ignore storage access errors.
+      // Ignore storage access errors (private mode, blocked cookies, etc.).
     }
     return storages;
   };
@@ -84,6 +89,16 @@ export function detectPlatform(): MiniAppPlatform {
       }
     }
   };
+
+  // One-time cleanup: earlier versions persisted the confirmed platform to
+  // localStorage, which permanently branded standalone browsers (e.g. a Safari
+  // tab that once opened a tgWebApp deep-link) as a messenger. Drop the legacy
+  // entry so already-affected browsers self-heal on next load.
+  try {
+    window.localStorage?.removeItem(CONFIRMED_PLATFORM_STORAGE_KEY);
+  } catch {
+    // Ignore storage access errors.
+  }
 
   const shellPlatform = readShellPlatform();
   if (shellPlatform) {
