@@ -146,7 +146,10 @@ export function createShellAPI(platform: PlatformResolver): ShellAPI {
       if (isShell(currentPlatform)) {
         return openNativeQrViaBridge();
       }
-      return startHtml5Qrcode();
+      // Native QR is a shell-only bridge call. Web/Telegram/VK platforms scan
+      // through their own adapter's scanQRCode override, so reaching here means
+      // openNativeQR was called outside a shell container.
+      throw new Error('Native QR scanning is only available inside a shell container.');
     },
     onPushToken(callback: PushListener): () => void {
       pushListeners.add(callback);
@@ -313,103 +316,5 @@ function openNativeQrViaBridge(): Promise<string> {
     }, SHELL_QR_TIMEOUT_MS);
 
     pendingQrRequest = { resolve, reject, timeoutId };
-  });
-}
-
-async function startHtml5Qrcode(): Promise<string> {
-  if (typeof document === 'undefined') {
-    throw new Error('QR scanning requires a browser environment.');
-  }
-
-  const [{ Html5Qrcode }] = await Promise.all([import('html5-qrcode')]);
-
-  return new Promise<string>((resolve, reject) => {
-    const elementId = `native-shell-qr-${Date.now()}`;
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.inset = '0';
-    overlay.style.background = 'rgba(0, 0, 0, 0.9)';
-    overlay.style.display = 'flex';
-    overlay.style.flexDirection = 'column';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    overlay.style.zIndex = '2147483647';
-    overlay.style.backdropFilter = 'blur(2px)';
-
-    const reader = document.createElement('div');
-    reader.id = elementId;
-    reader.style.width = '280px';
-    reader.style.height = '280px';
-    reader.style.borderRadius = '16px';
-    reader.style.overflow = 'hidden';
-    reader.style.position = 'relative';
-
-    const closeButton = document.createElement('button');
-    closeButton.type = 'button';
-    closeButton.textContent = '✕';
-    closeButton.style.position = 'absolute';
-    closeButton.style.top = '16px';
-    closeButton.style.right = '16px';
-    closeButton.style.background = 'transparent';
-    closeButton.style.border = 'none';
-    closeButton.style.color = '#fff';
-    closeButton.style.fontSize = '28px';
-    closeButton.style.cursor = 'pointer';
-
-    overlay.appendChild(closeButton);
-    overlay.appendChild(reader);
-    document.body.appendChild(overlay);
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    let disposed = false;
-    const scanner = new Html5Qrcode(elementId);
-
-    const cleanup = async (result?: string, error?: Error) => {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
-
-      try {
-        await scanner.stop();
-        const maybeClear = (scanner as unknown as { clear?: () => Promise<void> | void }).clear;
-        if (typeof maybeClear === 'function') {
-          await Promise.resolve(maybeClear.call(scanner));
-        }
-      } catch {
-        // Ignore stop errors.
-      }
-
-      overlay.remove();
-      document.body.style.overflow = previousOverflow;
-
-      if (typeof result === 'string') {
-        resolve(result);
-      } else if (error) {
-        reject(error);
-      } else {
-        reject(new Error('QR scanning was cancelled.'));
-      }
-    };
-
-    closeButton.addEventListener('click', () => {
-      void cleanup(undefined, new Error('QR scanning was cancelled by the user.'));
-    });
-
-    scanner
-      .start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 240, height: 240 } },
-        (decodedText: string) => {
-          void cleanup(decodedText);
-        },
-        () => {}
-      )
-      .catch((error: unknown) => {
-        const cause = error instanceof Error ? error : new Error('Unable to start HTML5 QR scanner.');
-        void cleanup(undefined, cause);
-      });
   });
 }

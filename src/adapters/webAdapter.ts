@@ -294,6 +294,16 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
           throw lastError instanceof Error ? lastError : new Error("Unable to access camera");
         }
 
+        // The user may have closed the overlay (or the view was destroyed) while
+        // getUserMedia was still pending — the permission prompt can take a couple
+        // of seconds. In that case finalize() already ran with stream === null, so
+        // the tracks would otherwise leak and keep the camera (and the device) hot.
+        if (closed) {
+          stream.getTracks().forEach((track) => track.stop());
+          stream = null;
+          return;
+        }
+
         const [videoTrack] = stream.getVideoTracks();
         if (videoTrack) {
           try {
@@ -313,20 +323,42 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
         video.srcObject = stream;
         await video.play();
 
+        // Closed while video.play() was awaiting — stop the camera and bail.
+        if (closed) {
+          stream.getTracks().forEach((track) => track.stop());
+          stream = null;
+          video.srcObject = null;
+          return;
+        }
+
+        // Cap the resolution we actually feed to jsQR. The camera streams up to
+        // 1920x1080 (~2MP), but decoding a full-res frame ~12x/sec pegs the CPU
+        // and overheats the phone. Downscaling the longest side to SCAN_MAX_DIM
+        // cuts the per-frame pixel work by roughly an order of magnitude while
+        // staying well above the resolution a QR needs to be readable.
+        const SCAN_MAX_DIM = 720;
+        // ~7 decodes/sec is plenty responsive for QR and far cooler than ~12.
+        const SCAN_INTERVAL_MS = 140;
+
         const scanFrame = (now: number) => {
           if (closed) {
             return;
           }
-          if (now - lastScanAt >= 80 && context && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            const width = video.videoWidth;
-            const height = video.videoHeight;
-            if (width > 0 && height > 0) {
+          if (now - lastScanAt >= SCAN_INTERVAL_MS && context && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            if (videoWidth > 0 && videoHeight > 0) {
+              const scale = Math.min(1, SCAN_MAX_DIM / Math.max(videoWidth, videoHeight));
+              const width = Math.round(videoWidth * scale);
+              const height = Math.round(videoHeight * scale);
               canvas.width = width;
               canvas.height = height;
               context.drawImage(video, 0, 0, width, height);
               const imageData = context.getImageData(0, 0, width, height);
+              // Loyalty QR codes are dark-on-light, so skip the inverted pass
+              // ("attemptBoth" runs jsQR twice and doubles the cost for nothing).
               const result = jsQR(imageData.data, width, height, {
-                inversionAttempts: "attemptBoth",
+                inversionAttempts: "dontInvert",
               });
               if (result?.data) {
                 closeScanner(result.data);
