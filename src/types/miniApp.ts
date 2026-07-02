@@ -66,6 +66,13 @@ export interface MiniAppInitOptions {
    * Allows adapters to mock vendor-specific quirks (e.g. Telegram macOS client).
    */
   mockForMacOS?: boolean;
+  /**
+   * When set, the host app owns the document theme: adapters must not toggle
+   * the `dark` class (or other theme DOM state) based on the platform's
+   * appearance. `getEnvironment().appearance` still reports the real platform
+   * appearance.
+   */
+  forcedAppearance?: 'dark' | 'light';
 }
 
 export interface MiniAppShareStoryOptions {

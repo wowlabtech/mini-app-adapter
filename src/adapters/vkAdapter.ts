@@ -59,6 +59,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     return baseSafeArea;
   }
   private unsubscribe?: () => void;
+  private forcedAppearance?: 'dark' | 'light';
   private launchParams?: GetLaunchParamsResponse;
   private queryParams?: Record<string, unknown>;
   private readonly viewHideListeners = new Set<() => void>();
@@ -68,10 +69,12 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     super('vk');
   }
 
-  override async init(_options?: MiniAppInitOptions): Promise<void> {
+  override async init(options?: MiniAppInitOptions): Promise<void> {
     if (this.ready) {
       return;
     }
+
+    this.forcedAppearance = options?.forcedAppearance;
 
     const handler: VKBridgeSubscribeHandler = (event) => this.handleBridgeEvent(event);
     bridge.subscribe(handler);
@@ -147,7 +150,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       if (canApplyViewSettings) {
         const statusBarStyle: AppearanceType = header
           ? this.resolveStatusBarStyle(header)
-          : this.environment.appearance?.includes('dark') ? 'light' : 'dark';
+          : (this.forcedAppearance ?? this.environment.appearance)?.includes('dark') ? 'light' : 'dark';
 
         await bridge.send('VKWebAppSetViewSettings', {
           status_bar_style: statusBarStyle,
@@ -681,14 +684,22 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       return;
     }
 
+    // The datasets always mirror the real platform appearance (informational),
+    // but the `dark` class belongs to the host app when the theme is forced —
+    // touching it here would silently revert the host's forced theme on every
+    // VKWebAppUpdateConfig.
+    const ownsThemeClass = !this.forcedAppearance;
+
     if (appearance) {
       document.documentElement.dataset.vkAppearance = appearance;
-      document.documentElement.classList.toggle('dark', appearance === 'dark');
+      if (ownsThemeClass) {
+        document.documentElement.classList.toggle('dark', appearance === 'dark');
+      }
     }
 
     if (scheme) {
       document.documentElement.dataset.vkScheme = scheme;
-      if (!appearance) {
+      if (ownsThemeClass && !appearance) {
         const normalized = this.normalizeAppearance(undefined, scheme);
         document.documentElement.classList.toggle('dark', normalized === 'dark');
       }
