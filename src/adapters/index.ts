@@ -1,3 +1,5 @@
+import { retrieveRawLaunchParams } from '@tma.js/bridge';
+
 import { ShellMiniAppAdapter } from '@/adapters/shellAdapter';
 import { TelegramMiniAppAdapter } from '@/adapters/telegramAdapter';
 import { VKMiniAppAdapter } from '@/adapters/vkAdapter';
@@ -120,20 +122,15 @@ export function detectPlatform(): MiniAppPlatform {
     return 'shell_ios';
   }
 
-  const telegramGlobals = window as typeof window & {
-    TelegramWebviewProxy?: unknown;
-    TelegramGameProxy?: unknown;
+  const canRetrieveTelegramLaunchParams = (): boolean => {
+    try {
+      return Boolean(retrieveRawLaunchParams());
+    } catch {
+      return false;
+    }
   };
-  const hasTelegramGlobal =
-    Boolean(window.Telegram?.WebApp)
-    || typeof telegramGlobals.TelegramWebviewProxy !== 'undefined'
-    || typeof telegramGlobals.TelegramGameProxy !== 'undefined';
   const hasTelegramParams = hasParam('tgWebAppPlatform', 'tgWebAppVersion', 'tgWebAppData', 'tgWebAppLanguage');
-  if (
-    hasTelegramGlobal
-    || hasTelegramParams
-    || userAgent.includes('telegram')
-  ) {
+  if (hasTelegramParams || canRetrieveTelegramLaunchParams()) {
     persistConfirmedPlatform('telegram');
     return 'telegram';
   }
