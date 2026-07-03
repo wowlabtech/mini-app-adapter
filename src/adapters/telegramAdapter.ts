@@ -239,9 +239,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         dispose();
       }
       this.backHandlers.delete(callback);
-      if (!this.backHandlers.size) {
-        backButton.hide();
-      }
     });
 
     this.backHandlers.set(callback, removeFromBag);
