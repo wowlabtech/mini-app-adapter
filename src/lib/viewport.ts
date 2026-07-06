@@ -27,25 +27,3 @@ export async function ensureViewportMounted(options: ViewportMountOptions): Prom
     await fallbackMount();
   }
 }
-
-export interface ViewportCssBindingOptions extends ViewportMountOptions {
-  bindCssVars?: (mapper?: (key: string) => string) => void;
-  mapper?: (key: string) => string;
-}
-
-export async function bindViewportCssVars(options: ViewportCssBindingOptions): Promise<void> {
-  await ensureViewportMounted(options);
-
-  if (typeof options.bindCssVars !== 'function') {
-    return;
-  }
-
-  try {
-    options.bindCssVars(options.mapper);
-  } catch (error) {
-    if (error instanceof Error && /css variables are already bound/i.test(error.message)) {
-      return;
-    }
-    throw error;
-  }
-}

@@ -248,10 +248,6 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     });
   }
 
-  bindCssVariables(_mapper?: (key: string) => string): void {
-    // No-op by default.
-  }
-
   vibrateImpact(_style: ImpactHapticFeedbackStyle): void {
     navigator.vibrate?.(10);
   }

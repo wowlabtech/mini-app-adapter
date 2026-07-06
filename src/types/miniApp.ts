@@ -122,7 +122,6 @@ export type MiniAppCapability =
   | 'closeApp'
   | 'backButton'
   | 'backButtonVisibility'
-  | 'bindCssVariables'
   | 'requestPhone'
   | 'notifications'
   | 'openExternalLink'
@@ -263,11 +262,6 @@ export interface MiniAppAdapter {
    * Aggregates all known safe area insets into a single value.
    */
   computeSafeArea: () => MiniAppEnvironmentInfo['safeArea'];
-
-  /**
-   * Binds platform theme variables to CSS custom properties.
-   */
-  bindCssVariables: (mapper?: (key: string) => string) => void;
 
   /**
    * Strong/weak haptic feedback helpers.

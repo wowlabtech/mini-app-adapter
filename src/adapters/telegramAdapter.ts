@@ -49,10 +49,9 @@ import type {
   MiniAppViewportInsets,
 } from '@/types/miniApp';
 import { ensureFeature, isFeatureAvailable } from '@/lib/features';
-import { bindViewportCssVars, ensureViewportMounted } from '@/lib/viewport';
+import { ensureViewportMounted } from '@/lib/viewport';
 export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   private readonly backHandlers = new Map<() => void, () => void>();
-  private cssVariablesBound = false;
   private readonly appearanceListeners = new Set<
     (appearance: 'dark' | 'light' | undefined) => void
   >();
@@ -166,7 +165,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     if (miniApp.mount.isAvailable()) {
       themeParams.mount();
       miniApp.mount();
-      this.bindCssVariables();
     }
 
     await this.prepareViewport();
@@ -291,8 +289,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         return backButton.isSupported();
       case 'backButtonVisibility':
         return backButton.hide.isSupported();
-      case 'bindCssVariables':
-        return true;
       case 'openExternalLink':
         return isFeatureAvailable(openLink);
       case 'openInternalLink':
@@ -327,23 +323,6 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
         return isFeatureAvailable(requestContact);
       default:
         return false;
-    }
-  }
-
-  override bindCssVariables(mapper?: (key: string) => string): void {
-    if (this.cssVariablesBound) {
-      return;
-    }
-
-    try {
-      themeParams.bindCssVars(mapper);
-      this.cssVariablesBound = true;
-    } catch (error) {
-      if (error instanceof Error && /css variables are already bound/i.test(error.message)) {
-        this.cssVariablesBound = true;
-        return;
-      }
-      throw error;
     }
   }
 
@@ -810,10 +789,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
   private async prepareViewport(): Promise<void> {
     try {
-      await bindViewportCssVars({
-        ...this.getViewportMountOptions(),
-        bindCssVars: typeof viewport.bindCssVars === 'function' ? viewport.bindCssVars : undefined,
-      });
+      await ensureViewportMounted(this.getViewportMountOptions());
     } catch (error) {
       console.warn('[tvm-app-adapter] prepareViewport failed:', error);
     }
