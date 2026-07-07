@@ -1,8 +1,20 @@
 import jsQR from "jsqr";
+import { UAParser, type IResult } from 'ua-parser-js';
 
 import { BaseMiniAppAdapter } from './baseAdapter';
 import type { MiniAppCapability, MiniAppQrScanOptions } from '@/types/miniApp';
 import { triggerFileDownload } from '@/lib/download';
+
+// The Apple system share sheet (iOS, iPadOS and macOS alike — any browser, since
+// they all hand off to the same native sheet) receives `text` and `url` as
+// separate items, and each share target picks whichever it prefers: some send
+// only the text, others only the link. `withFeatureCheck` also catches iPadOS
+// reporting a desktop Macintosh user agent (flips device model to iPad via
+// touch-points while `os` keeps saying macOS).
+function isApplePlatform(): boolean {
+  const { os, device } = UAParser(navigator.userAgent).withFeatureCheck() as IResult;
+  return os.name === 'iOS' || os.name === 'macOS' || device.model === 'iPad';
+}
 
 export class WebMiniAppAdapter extends BaseMiniAppAdapter {
   private deferredPrompt: BeforeInstallPromptEvent | null = null;
@@ -387,13 +399,15 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
         return;
       }
 
-      // Note: iOS hands `text` and `url` to share targets as separate items and
-      // some of them consume only the first one, dropping the link. The adapter
-      // deliberately stays platform-agnostic — consumers that care should
-      // pre-compose the payload (e.g. pass the url inside `text`) or call
-      // navigator.share themselves.
+      // A single combined text item survives every target of the Apple share
+      // sheet, which otherwise lets targets drop either the text or the link
+      // (see isApplePlatform).
+      const data: ShareData = isApplePlatform()
+        ? { text: text ? `${text}\n${url}` : url }
+        : { text, url };
+
       this.sharePending = true;
-      navigator.share({ text, url })
+      navigator.share(data)
         .catch((err) => {
           console.warn('Share cancelled or failed:', err);
         })
