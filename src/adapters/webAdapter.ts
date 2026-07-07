@@ -6,6 +6,7 @@ import { triggerFileDownload } from '@/lib/download';
 
 export class WebMiniAppAdapter extends BaseMiniAppAdapter {
   private deferredPrompt: BeforeInstallPromptEvent | null = null;
+  private sharePending = false;
 
   constructor() {
     super("web", {
@@ -379,12 +380,27 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
   }
   shareUrl(url: string, text?: string): void {
     if (navigator.share) {
-      try {
-        navigator.share({ title: text, text, url });
+      // A second navigator.share while the native sheet is still open rejects
+      // with InvalidStateError ("An earlier share has not yet completed"), so
+      // repeated taps are ignored until the current share settles.
+      if (this.sharePending) {
         return;
-      } catch (err) {
-        console.warn('Share cancelled or failed:', err);
       }
+
+      // Note: iOS hands `text` and `url` to share targets as separate items and
+      // some of them consume only the first one, dropping the link. The adapter
+      // deliberately stays platform-agnostic — consumers that care should
+      // pre-compose the payload (e.g. pass the url inside `text`) or call
+      // navigator.share themselves.
+      this.sharePending = true;
+      navigator.share({ text, url })
+        .catch((err) => {
+          console.warn('Share cancelled or failed:', err);
+        })
+        .finally(() => {
+          this.sharePending = false;
+        });
+      return;
     }
 
     const payload = text ? `${text}\n${url}` : url;
