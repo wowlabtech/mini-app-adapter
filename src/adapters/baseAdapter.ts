@@ -94,7 +94,9 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     };
   }
 
-  async setColors(colors: { header?: string; background?: string }): Promise<void> {
+  // `footer` has no browser equivalent; platform adapters map it to native
+  // bottom bars (Telegram bottom bar, Android navigation bar in VK).
+  async setColors(colors: { header?: string; background?: string; footer?: string }): Promise<void> {
     if (colors.background) {
       document.body.style.backgroundColor = colors.background;
     }
@@ -133,6 +135,10 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
   }
 
   setBackButtonVisibility(_visible: boolean): void {
+    // No-op by default.
+  }
+
+  setClosingConfirmation(_enabled: boolean): void {
     // No-op by default.
   }
 

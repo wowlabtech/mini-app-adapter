@@ -224,6 +224,11 @@ export interface MiniAppAdapter {
   enableDebug?: (state: boolean) => void;
 
   /**
+   * Toggles the native "close the app?" confirmation dialog if supported.
+   */
+  setClosingConfirmation?: (enabled: boolean) => void;
+
+  /**
    * Subscribes to appearance changes if supported by the platform.
    */
   onAppearanceChange?: (callback: (appearance: 'dark' | 'light' | undefined) => void) => () => void;

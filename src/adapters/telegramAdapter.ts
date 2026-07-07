@@ -183,41 +183,51 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     const fallback: { header?: string; background?: string; footer?: string } = {};
 
     if (colors.header) {
-      if (miniApp.setHeaderColor.isAvailable()) {
-        const headerColor = miniApp.setHeaderColor.supports?.('rgb') ? colors.header : 'bg_color';
-        const { ok } = ensureFeature(miniApp.setHeaderColor, headerColor);
-        if (!ok) {
-          fallback.header = colors.header;
-        }
-      } else {
+      const headerColor = miniApp.setHeaderColor.supports?.('rgb') ? colors.header : 'bg_color';
+      if (!this.applyNativeColor(miniApp.setHeaderColor, headerColor, 'web_app_set_header_color', colors.header)) {
         fallback.header = colors.header;
       }
     }
 
     if (colors.background) {
-      if (miniApp.setBgColor.isAvailable()) {
-        const { ok } = ensureFeature(miniApp.setBgColor, colors.background);
-        if (!ok) {
-          fallback.background = colors.background;
-        }
-      } else {
+      if (!this.applyNativeColor(miniApp.setBgColor, colors.background, 'web_app_set_background_color', colors.background)) {
         fallback.background = colors.background;
       }
     }
 
     if (colors.footer) {
-      if (miniApp.setBgColor.isAvailable()) {
-        const { ok } = ensureFeature(miniApp.setBottomBarColorFp, colors.footer);
-        if (!ok) {
-          fallback.footer = colors.footer;
-        }
-      } else {
+      if (!this.applyNativeColor(miniApp.setBottomBarColor, colors.footer, 'web_app_set_bottom_bar_color', colors.footer)) {
         fallback.footer = colors.footer;
       }
     }
 
-    if (fallback.header || fallback.background) {
+    if (fallback.header || fallback.background || fallback.footer) {
       await super.setColors(fallback);
+    }
+  }
+
+  // The SDK feature wrappers gate calls on their own mount/version detection,
+  // which is stricter than some clients actually are. When the wrapper refuses,
+  // post the raw Mini Apps event: clients that don't support the method ignore it.
+  private applyNativeColor(
+    feature: Parameters<typeof ensureFeature>[0],
+    value: string,
+    method: 'web_app_set_header_color' | 'web_app_set_background_color' | 'web_app_set_bottom_bar_color',
+    rawColor: string,
+  ): boolean {
+    if (isFeatureAvailable(feature)) {
+      const { ok } = ensureFeature(feature, value);
+      if (ok) {
+        return true;
+      }
+    }
+
+    try {
+      postEvent(method, { color: rawColor as `#${string}` });
+      return true;
+    } catch (error) {
+      console.warn(`[tvm-app-adapter] ${method} failed:`, error);
+      return false;
     }
   }
 
@@ -245,7 +255,9 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
   override async openExternalLink(url: string): Promise<void> {
     try {
-      openLink(url, { tryInstantView: true });
+      // No `tryInstantView`: Instant View would intercept pages that must open
+      // as-is (payments, auth flows); callers wanting IV can post the event themselves.
+      openLink(url);
       return;
     } catch {
       // Fall back to default behaviour if Telegram specific API is not available.
@@ -254,20 +266,45 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   override async openInternalLink(url: string): Promise<void> {
-    try {
-      postEvent('web_app_open_tg_link', { path_full: url });
-      return;
-    } catch (error) {
-      console.warn('[tvm-app-adapter] Telegram openInternalLink failed:', error);
+    // `web_app_open_tg_link` expects `path_full` — the part of the link after
+    // `https://t.me` (e.g. `/username?start=x`), not a full URL.
+    const pathFull = this.toTelegramPathFull(url);
+
+    if (pathFull) {
+      try {
+        postEvent('web_app_open_tg_link', { path_full: pathFull });
+        return;
+      } catch (error) {
+        console.warn('[tvm-app-adapter] Telegram openInternalLink failed:', error);
+      }
     }
+
     await super.openInternalLink(url);
   }
 
   enableDebug(state: boolean): void {
+    setDebug(state);
+  }
+
+  override setClosingConfirmation(enabled: boolean): void {
     try {
-      state ? closingBehavior.enableConfirmation() : closingBehavior.disableConfirmation();
-    } catch {
-      // Ignore unsupported environments.
+      const behavior = closingBehavior as typeof closingBehavior & {
+        isMounted?: () => boolean;
+        mount?: { isAvailable?: () => boolean } & (() => void);
+      };
+
+      if (typeof behavior.isMounted === 'function' && !behavior.isMounted()
+        && behavior.mount?.isAvailable?.()) {
+        behavior.mount();
+      }
+
+      if (enabled) {
+        closingBehavior.enableConfirmation();
+      } else {
+        closingBehavior.disableConfirmation();
+      }
+    } catch (error) {
+      console.warn('[tvm-app-adapter] setClosingConfirmation failed:', error);
     }
   }
 
@@ -653,6 +690,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
     return new Promise<boolean>((resolve) => {
       const cleanup = () => {
+        clearTimeout(timeout);
         off('home_screen_added', handleSuccess);
         off('home_screen_failed', handleFail);
       };
@@ -669,6 +707,10 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
       on('home_screen_added', handleSuccess);
       on('home_screen_failed', handleFail);
+
+      // The client is not obliged to emit anything when the user dismisses the
+      // system prompt, so an unanswered request must not hang the promise.
+      const timeout = setTimeout(handleFail, 30_000);
 
       try {
         addToHomeScreenSdk();
@@ -879,6 +921,23 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       } catch (error) {
         console.warn('[tvm-app-adapter] onViewHide listener failed:', error);
       }
+    }
+  }
+
+  // Reduces a Telegram link to the `path_full` form `web_app_open_tg_link`
+  // expects. Returns undefined for links outside t.me so the caller can fall
+  // back to a regular navigation.
+  private toTelegramPathFull(url: string): string | undefined {
+    try {
+      const parsed = new URL(url, 'https://t.me');
+      const host = parsed.hostname.toLowerCase();
+      if (!['t.me', 'telegram.me', 'telegram.dog'].includes(host)) {
+        return undefined;
+      }
+      const pathFull = `${parsed.pathname}${parsed.search}`;
+      return pathFull === '/' ? undefined : pathFull;
+    } catch {
+      return undefined;
     }
   }
 

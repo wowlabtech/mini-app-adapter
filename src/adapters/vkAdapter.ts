@@ -141,10 +141,13 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  override async setColors(colors: { header?: string; background?: string }): Promise<void> {
-    const { header, background } = colors;
+  override async setColors(colors: { header?: string; background?: string; footer?: string }): Promise<void> {
+    const { header, background, footer } = colors;
+    // `navigation_bar_color` paints the Android system navigation bar, which sits
+    // right under the app's bottom bar — so the footer color matches it best.
+    const navigationBarColor = footer ?? background;
 
-    if (header || background) {
+    if (header || navigationBarColor) {
       const canApplyViewSettings = await this.supportsBridgeMethod('VKWebAppSetViewSettings');
 
       if (canApplyViewSettings) {
@@ -155,7 +158,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
         await bridge.send('VKWebAppSetViewSettings', {
           status_bar_style: statusBarStyle,
           ...(header ? { action_bar_color: header } : {}),
-          ...(background ? { navigation_bar_color: background } : {}),
+          ...(navigationBarColor ? { navigation_bar_color: navigationBarColor } : {}),
         });
       }
     }
@@ -273,6 +276,8 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
         return typeof phoneNumber === 'string' && phoneNumber ? phoneNumber : null;
       }
 
+      // VKWebAppGetPersonalCard is deprecated in the VK docs; it stays only as
+      // a legacy fallback and is gated by supportsBridgeMethod above.
       const card = await bridge.send('VKWebAppGetPersonalCard', { type: ['phone'] });
       const phone = (card as { phone?: unknown }).phone;
       return typeof phone === 'string' && phone ? phone : null;
@@ -424,10 +429,9 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     }
 
     try {
-      await bridge.send('VKWebAppShare', {
-        link: url,
-        ...(text ? { text } : {}),
-      });
+      // VKWebAppShare accepts only `link` (per docs and vk-bridge types); the
+      // `text` argument is used by fallbacks on platforms that support it.
+      await bridge.send('VKWebAppShare', { link: url });
     } catch (error) {
       console.warn('[tvm-app-adapter] VK shareUrl failed:', error);
       super.shareUrl(url, text ?? '');
