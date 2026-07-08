@@ -13,6 +13,7 @@ import {
   type MiniAppPlatform,
   type MiniAppPopupOptions,
   type MiniAppQrScanOptions,
+  type MiniAppViewRestoreData,
   type MiniAppViewportInsets,
 } from '@/types/miniApp';
 import { DisposableBag, type Disposable } from '@/lib/disposables';
@@ -270,7 +271,15 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return () => {};
   }
 
-  onViewRestore(_callback: () => void): () => void {
+  onViewRestore(_callback: (data?: MiniAppViewRestoreData) => void): () => void {
+    return () => {};
+  }
+
+  onLocationChanged(_callback: (location: string) => void): () => void {
+    return () => {};
+  }
+
+  onRelaunchLocation(_callback: (location: string) => void): () => void {
     return () => {};
   }
 

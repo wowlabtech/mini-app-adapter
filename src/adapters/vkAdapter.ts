@@ -24,12 +24,18 @@ import type {
   MiniAppLaunchParams,
   MiniAppQrScanOptions,
   MiniAppShareStoryOptions,
+  MiniAppViewRestoreData,
 } from '@/types/miniApp';
 import { isBridgeMethodSupported, type BridgeSupportsAsync } from '@/lib/bridge';
 import { computeCombinedSafeArea, createSafeAreaWatcher, readCssSafeArea } from '@/lib/safeArea';
 
 const ANALYTICS_EVENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,63}$/i;
 const ANALYTICS_FALLBACK_EVENT = 'VK_ANALYTICS_EVENT';
+
+// The client may deliver the same relaunch location via several channels at
+// once (bridge event + hashchange on web); re-emitting it would make consumers
+// re-apply the same deep link twice.
+const RELAUNCH_DEDUPE_WINDOW_MS = 3_000;
 
 type VkAnalyticsMethod = 'VKWebAppConversionHit' | 'VKWebAppRetargetingPixel';
 type VkAnalyticsEnvelope = {
@@ -63,7 +69,10 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   private launchParams?: GetLaunchParamsResponse;
   private queryParams?: Record<string, unknown>;
   private readonly viewHideListeners = new Set<() => void>();
-  private readonly viewRestoreListeners = new Set<() => void>();
+  private readonly viewRestoreListeners = new Set<(data?: MiniAppViewRestoreData) => void>();
+  private readonly locationChangedListeners = new Set<(location: string) => void>();
+  private readonly relaunchLocationListeners = new Set<(location: string) => void>();
+  private lastRelaunchLocation?: { location: string; at: number };
 
   constructor() {
     super('vk');
@@ -119,6 +128,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
 
     this.ready = true;
     this.startViewportTracking();
+    this.startHashTracking();
   }
 
   override async vibrateImpact(style: ImpactHapticFeedbackStyle): Promise<void> {
@@ -365,10 +375,24 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     };
   }
 
-  override onViewRestore(callback: () => void): () => void {
+  override onViewRestore(callback: (data?: MiniAppViewRestoreData) => void): () => void {
     this.viewRestoreListeners.add(callback);
     return () => {
       this.viewRestoreListeners.delete(callback);
+    };
+  }
+
+  override onLocationChanged(callback: (location: string) => void): () => void {
+    this.locationChangedListeners.add(callback);
+    return () => {
+      this.locationChangedListeners.delete(callback);
+    };
+  }
+
+  override onRelaunchLocation(callback: (location: string) => void): () => void {
+    this.relaunchLocationListeners.add(callback);
+    return () => {
+      this.relaunchLocationListeners.delete(callback);
     };
   }
 
@@ -617,12 +641,30 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     const { type, data } = event.detail ?? {};
 
     if (type === 'VKWebAppViewHide') {
-      this.notifyVisibilityListeners(this.viewHideListeners);
+      this.notifyListeners(this.viewHideListeners, undefined);
       return;
     }
 
     if (type === 'VKWebAppViewRestore') {
-      this.notifyVisibilityListeners(this.viewRestoreListeners);
+      // Typed as an empty payload, but VK mobile clients are known to include
+      // the new webview location (hash) when a cached app is reopened via a
+      // deep link. Read it defensively; the documented channel is
+      // VKWebAppLocationChanged below.
+      const location = this.extractEventLocation(data);
+      this.notifyListeners(
+        this.viewRestoreListeners,
+        location === undefined ? undefined : { location },
+      );
+      this.emitRelaunchLocation(location);
+      return;
+    }
+
+    if (type === 'VKWebAppLocationChanged') {
+      const location = this.extractEventLocation(data);
+      if (location !== undefined) {
+        this.notifyListeners(this.locationChangedListeners, location);
+        this.emitRelaunchLocation(location);
+      }
       return;
     }
 
@@ -630,6 +672,51 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
       const config = data as ParentConfigData;
       this.updateEnvironmentFromConfig(config);
     }
+  }
+
+  private extractEventLocation(data: unknown): string | undefined {
+    if (!data || typeof data !== 'object') {
+      return undefined;
+    }
+
+    const location = (data as { location?: unknown }).location;
+    return typeof location === 'string' ? location : undefined;
+  }
+
+  private emitRelaunchLocation(rawLocation: string | undefined): void {
+    if (!rawLocation) {
+      return;
+    }
+
+    const location = rawLocation.startsWith('#') ? rawLocation.slice(1) : rawLocation;
+    if (!location) {
+      return;
+    }
+
+    const now = Date.now();
+    if (
+      this.lastRelaunchLocation &&
+      this.lastRelaunchLocation.location === location &&
+      now - this.lastRelaunchLocation.at < RELAUNCH_DEDUPE_WINDOW_MS
+    ) {
+      return;
+    }
+
+    this.lastRelaunchLocation = { location, at: now };
+    this.notifyListeners(this.relaunchLocationListeners, location);
+  }
+
+  private startHashTracking(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    // Web iframe: the desktop client updates the iframe fragment instead of
+    // (or besides) sending a bridge event; dedupe in emitRelaunchLocation
+    // collapses double delivery.
+    const onHashChange = () => this.emitRelaunchLocation(window.location.hash);
+    window.addEventListener('hashchange', onHashChange);
+    this.registerDisposable(() => window.removeEventListener('hashchange', onHashChange));
   }
 
   private updateEnvironmentFromConfig(config: ParentConfigData): void {
@@ -765,12 +852,12 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     return { top: nTop, right: nRight, bottom: nBottom, left: nLeft };
   }
 
-  private notifyVisibilityListeners(listeners: Set<() => void>): void {
+  private notifyListeners<T>(listeners: Set<(arg: T) => void>, arg: T): void {
     for (const listener of listeners) {
       try {
-        listener();
+        listener(arg);
       } catch (error) {
-        console.warn('[tvm-app-adapter] VK visibility listener failed:', error);
+        console.warn('[tvm-app-adapter] VK event listener failed:', error);
       }
     }
   }
@@ -886,6 +973,8 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     this.stopViewportTracking = undefined;
     this.viewHideListeners.clear();
     this.viewRestoreListeners.clear();
+    this.locationChangedListeners.clear();
+    this.relaunchLocationListeners.clear();
     super.onDestroy();
   }
 }

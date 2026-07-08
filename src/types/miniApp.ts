@@ -156,6 +156,14 @@ export interface MiniAppQrScanOptions {
   closeOnCapture?: boolean;
 }
 
+export interface MiniAppViewRestoreData {
+  /**
+   * New webview location (URL fragment, without `#`) if the host provided one.
+   * VK mobile clients include it when a cached app is reopened via a deep link.
+   */
+  location?: string;
+}
+
 export interface MiniAppAdapter {
   readonly platform: MiniAppPlatform;
   readonly shell: ShellAPI;
@@ -277,9 +285,32 @@ export interface MiniAppAdapter {
 
   /**
    * Notifies when the host view goes to background/foreground (VK only).
+   * On restore VK mobile clients may pass the new webview location (hash)
+   * when the cached app was reopened via a deep link.
    */
   onViewHide?: (callback: () => void) => () => void;
-  onViewRestore?: (callback: () => void) => () => void;
+  onViewRestore?: (callback: (data?: MiniAppViewRestoreData) => void) => () => void;
+
+  /**
+   * Notifies when the host changes the app location (VK `VKWebAppLocationChanged`).
+   * Fired without a webview reload, e.g. when a cached app is reopened via a link
+   * with a different hash. `location` is the new fragment (without `#`).
+   */
+  onLocationChanged?: (callback: (location: string) => void) => () => void;
+
+  /**
+   * Normalized "the app was relaunched with a new location without a reload"
+   * event. On VK it unifies the platform quirks behind one callback:
+   * `VKWebAppLocationChanged` (the documented channel for the new hash),
+   * a defensive read of `location` from `VKWebAppViewRestore` (mobile clients
+   * are known to include it despite the typed-empty payload), and `hashchange`
+   * (web iframe). Duplicate deliveries of the same location via several
+   * channels are deduped inside the adapter. `location` is the new fragment
+   * without the leading `#`.
+   *
+   * No-op on platforms that recreate the webview per launch (Telegram, web).
+   */
+  onRelaunchLocation?: (callback: (location: string) => void) => () => void;
 
   /**
    * Enables or disables vertical swipe gestures if supported by the platform.
