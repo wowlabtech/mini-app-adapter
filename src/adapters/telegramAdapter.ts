@@ -143,29 +143,26 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     miniApp.ready();
 
     const launchParams = retrieveLaunchParams();
-    let appearance: string | undefined;
-    try {
-      appearance = miniApp.isDark() ? 'dark' : 'light';
-    } catch {
-      appearance = undefined;
+
+    backButton.mount.ifAvailable();
+
+    // Mounted before the environment is composed: theme params are empty
+    // until mount restores them from `tgWebAppThemeParams`, and the initial
+    // appearance below reads them.
+    if (miniApp.mount.isAvailable()) {
+      themeParams.mount();
+      miniApp.mount();
     }
 
     const environment: MiniAppEnvironmentInfo = {
       platform: 'telegram',
       sdkVersion: launchParams.tgWebAppVersion,
       languageCode: initData.user()?.language_code,
-      appearance,
+      appearance: this.readThemeParamsAppearance(),
       isWebView: true,
     };
     this.environment = environment;
     this.notifyAppearance(environment.appearance as 'dark' | 'light' | undefined);
-
-    backButton.mount.ifAvailable();
-
-    if (miniApp.mount.isAvailable()) {
-      themeParams.mount();
-      miniApp.mount();
-    }
 
     await this.prepareViewport();
 
@@ -776,21 +773,50 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
+  // The client theme lives in theme params (`tgWebAppThemeParams` at launch,
+  // `theme_changed` events afterwards) — the signal the official
+  // `colorScheme` field derives from. Reading it raw is unsafe on both sides:
+  // `themeParams.isDark` falsely defaults to dark while `bg_color` is unset
+  // (empty pre-mount state, partial diffs), and `miniApp.isDark` tracks the
+  // mini app's OWN background color, which `setColors` overrides with
+  // explicit RGB values — it echoes whatever theme the host app applied
+  // last, not the client theme. So: theme params only, and only when
+  // `bg_color` is actually present.
+  private readThemeParamsAppearance(): 'dark' | 'light' | undefined {
+    try {
+      if (!themeParams.bgColor()) {
+        return undefined;
+      }
+      return themeParams.isDark() ? 'dark' : 'light';
+    } catch {
+      return undefined;
+    }
+  }
+
   private setupAppearanceWatcher(): void {
     this.appearanceWatcherDispose?.();
 
-    // `themeParams.isDark` (bg_color-based) defaults to `dark` whenever
-    // `bg_color` is momentarily unset in a `theme_changed` diff, which can get
-    // this stuck reporting `dark` for the whole session on a light client.
-    // `miniApp.isDark` (bgColorRgb-based) — the same signal `init()` already
-    // uses for the initial value above — safely defaults to `light` in the
-    // same situation, so live updates use it too.
-    if (typeof miniApp.isDark?.sub === 'function') {
-      const disposer = miniApp.isDark.sub(() => {
-        const appearance = miniApp.isDark() ? 'dark' : 'light';
-        this.environment.appearance = appearance;
-        this.notifyAppearance(appearance);
-      });
+    const onThemeParamsChange = () => {
+      const appearance = this.readThemeParamsAppearance();
+      if (!appearance || appearance === this.environment.appearance) {
+        return;
+      }
+      this.environment.appearance = appearance;
+      this.notifyAppearance(appearance);
+    };
+
+    // Prefer subscribing to bg_color over the isDark computed: while
+    // bg_color is unset isDark spuriously reads dark, and if the next real
+    // theme is also dark the computed value never changes and the update is
+    // swallowed; bg_color itself always changes when real data arrives.
+    let disposer: (() => void) | undefined;
+    if (typeof themeParams.bgColor?.sub === 'function') {
+      disposer = themeParams.bgColor.sub(onThemeParamsChange);
+    } else if (typeof themeParams.isDark?.sub === 'function') {
+      disposer = themeParams.isDark.sub(onThemeParamsChange);
+    }
+
+    if (disposer) {
       this.appearanceWatcherDispose = this.registerDisposable(disposer);
     }
   }

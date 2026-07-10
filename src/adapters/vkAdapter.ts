@@ -68,6 +68,9 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
   private forcedAppearance?: 'dark' | 'light';
   private launchParams?: GetLaunchParamsResponse;
   private queryParams?: Record<string, unknown>;
+  private readonly appearanceListeners = new Set<
+    (appearance: 'dark' | 'light' | undefined) => void
+  >();
   private readonly viewHideListeners = new Set<() => void>();
   private readonly viewRestoreListeners = new Set<(data?: MiniAppViewRestoreData) => void>();
   private readonly locationChangedListeners = new Set<(location: string) => void>();
@@ -730,6 +733,7 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     if (nextAppearance && nextAppearance !== this.environment.appearance) {
       this.environment.appearance = nextAppearance;
       changed = true;
+      this.notifyAppearance(nextAppearance);
     }
 
     const prevSafeArea = this.environment.safeArea;
@@ -966,11 +970,34 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     return isBridgeMethodSupported(method, this.supportsAsync);
   }
 
+  // The base implementation is one-shot; VK gets live updates because the
+  // client pushes VKWebAppUpdateConfig whenever the host theme changes.
+  override onAppearanceChange(
+    callback: (appearance: 'dark' | 'light' | undefined) => void,
+  ): () => void {
+    this.appearanceListeners.add(callback);
+    callback(this.environment.appearance as 'dark' | 'light' | undefined);
+    return () => {
+      this.appearanceListeners.delete(callback);
+    };
+  }
+
+  private notifyAppearance(appearance: 'dark' | 'light' | undefined): void {
+    for (const listener of this.appearanceListeners) {
+      try {
+        listener(appearance);
+      } catch (error) {
+        console.warn('[tvm-app-adapter] VK appearance listener failed:', error);
+      }
+    }
+  }
+
   protected override onDestroy(): void {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.stopViewportTracking?.();
     this.stopViewportTracking = undefined;
+    this.appearanceListeners.clear();
     this.viewHideListeners.clear();
     this.viewRestoreListeners.clear();
     this.locationChangedListeners.clear();
