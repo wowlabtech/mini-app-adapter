@@ -779,9 +779,15 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   private setupAppearanceWatcher(): void {
     this.appearanceWatcherDispose?.();
 
-    if (typeof themeParams.isDark?.sub === 'function') {
-      const disposer = themeParams.isDark.sub(() => {
-        const appearance = themeParams.isDark() ? 'dark' : 'light';
+    // `themeParams.isDark` (bg_color-based) defaults to `dark` whenever
+    // `bg_color` is momentarily unset in a `theme_changed` diff, which can get
+    // this stuck reporting `dark` for the whole session on a light client.
+    // `miniApp.isDark` (bgColorRgb-based) — the same signal `init()` already
+    // uses for the initial value above — safely defaults to `light` in the
+    // same situation, so live updates use it too.
+    if (typeof miniApp.isDark?.sub === 'function') {
+      const disposer = miniApp.isDark.sub(() => {
+        const appearance = miniApp.isDark() ? 'dark' : 'light';
         this.environment.appearance = appearance;
         this.notifyAppearance(appearance);
       });
