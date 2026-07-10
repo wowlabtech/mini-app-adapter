@@ -1,24 +1,12 @@
 import jsQR from "jsqr";
-import { UAParser, type IResult } from 'ua-parser-js';
 
 import { BaseMiniAppAdapter } from './baseAdapter';
 import type { MiniAppCapability, MiniAppQrScanOptions } from '@/types/miniApp';
 import { triggerFileDownload } from '@/lib/download';
-
-// The Apple system share sheet (iOS, iPadOS and macOS alike — any browser, since
-// they all hand off to the same native sheet) receives `text` and `url` as
-// separate items, and each share target picks whichever it prefers: some send
-// only the text, others only the link. `withFeatureCheck` also catches iPadOS
-// reporting a desktop Macintosh user agent (flips device model to iPad via
-// touch-points while `os` keeps saying macOS).
-function isApplePlatform(): boolean {
-  const { os, device } = UAParser(navigator.userAgent).withFeatureCheck() as IResult;
-  return os.name === 'iOS' || os.name === 'macOS' || device.model === 'iPad';
-}
+import { shareNative } from '@/lib/nativeShare';
 
 export class WebMiniAppAdapter extends BaseMiniAppAdapter {
   private deferredPrompt: BeforeInstallPromptEvent | null = null;
-  private sharePending = false;
 
   constructor() {
     super("web", {
@@ -391,35 +379,13 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
     });
   }
   shareUrl(url: string, text?: string): void {
-    if (navigator.share) {
-      // A second navigator.share while the native sheet is still open rejects
-      // with InvalidStateError ("An earlier share has not yet completed"), so
-      // repeated taps are ignored until the current share settles.
-      if (this.sharePending) {
-        return;
-      }
+    void shareNative(url, text).then((result) => {
+      if (result !== 'unsupported') return;
 
-      // A single combined text item survives every target of the Apple share
-      // sheet, which otherwise lets targets drop either the text or the link
-      // (see isApplePlatform).
-      const data: ShareData = isApplePlatform()
-        ? { text: text ? `${text}\n${url}` : url }
-        : { text, url };
-
-      this.sharePending = true;
-      navigator.share(data)
-        .catch((err) => {
-          console.warn('Share cancelled or failed:', err);
-        })
-        .finally(() => {
-          this.sharePending = false;
-        });
-      return;
-    }
-
-    const payload = text ? `${text}\n${url}` : url;
-    this.copyTextToClipboard(payload).catch((err) => {
-      console.warn('Share fallback (clipboard) failed:', err);
+      const payload = text ? `${text}\n${url}` : url;
+      this.copyTextToClipboard(payload).catch((err) => {
+        console.warn('Share fallback (clipboard) failed:', err);
+      });
     });
   }
 

@@ -69,6 +69,14 @@ export {
 } from '@/platform';
 
 export {
+  shareNative,
+} from '@/lib/nativeShare';
+
+export type {
+  NativeShareResult,
+} from '@/lib/nativeShare';
+
+export {
   shell,
   createShellAPI,
   isShell,
