@@ -1,4 +1,4 @@
-import { retrieveRawLaunchParams } from '@tma.js/bridge';
+import { hasWebviewProxy, retrieveRawLaunchParams } from '@tma.js/bridge';
 
 import { ShellMiniAppAdapter } from '@/adapters/shellAdapter';
 import { TelegramMiniAppAdapter } from '@/adapters/telegramAdapter';
@@ -50,8 +50,12 @@ export function detectPlatform(): MiniAppPlatform {
     // and never expired, which permanently branded standalone browsers as `telegram`
     // after a single deep-link that carried tgWebApp params — breaking auth there.
     //
-    // A killed/relaunched webview loses sessionStorage, but the host always relaunches
-    // the mini app with fresh launch params in the URL, so detection re-runs cleanly.
+    // A killed webview does NOT reliably re-run detection from launch params: when the
+    // OS reclaims the web process after long backgrounding, Telegram/VK restore the
+    // webview at the CURRENT SPA URL (params already stripped by the router) and
+    // sessionStorage may come back empty. That case is covered by the live host-bridge
+    // signals below (TelegramWebviewProxy / VK message handlers), which the native
+    // clients inject into every page load.
     try {
       if (window.sessionStorage) {
         storages.push(window.sessionStorage);
@@ -130,17 +134,35 @@ export function detectPlatform(): MiniAppPlatform {
     }
   };
   const hasTelegramParams = hasParam('tgWebAppPlatform', 'tgWebAppVersion', 'tgWebAppData', 'tgWebAppLanguage');
-  if (hasTelegramParams || canRetrieveTelegramLaunchParams()) {
+  // TelegramWebviewProxy is injected by the native/desktop Telegram clients into every
+  // page the webview loads, so it survives a process-kill reload that lost both the
+  // launch params and sessionStorage. Telegram-web (iframe) has no sync marker, but a
+  // browser tab keeps sessionStorage across backgrounding, so it is already covered.
+  if (hasTelegramParams || hasWebviewProxy(window) || canRetrieveTelegramLaunchParams()) {
     persistConfirmedPlatform('telegram');
     return 'telegram';
   }
 
   const hasVkParams = hasParam('vk_app_id', 'vk_platform', 'vk_user_id', 'vk_language', 'sign');
+  // Same live-signal idea for VK: the mobile clients expose their bridge transport on
+  // every page load — AndroidBridge on Android, the VKWebAppClose message handler on
+  // iOS. These are exactly the markers vk-bridge's own isWebView() checks. A bare
+  // `window.parent !== window` must NOT be used here: Telegram-web is an iframe too.
+  const vkWindow = window as typeof window & {
+    AndroidBridge?: unknown;
+    webkit?: { messageHandlers?: { VKWebAppClose?: unknown } };
+  };
+  const hasVkNativeBridge =
+    Boolean(vkWindow.AndroidBridge)
+    || Boolean(vkWindow.webkit?.messageHandlers?.VKWebAppClose);
   const hasVkUserAgentSignal =
     userAgent.includes('vkclient')
+    // The real VK Android UA marker is `VKAndroidApp/…` (no hyphen); `vk-android` is
+    // kept for older builds that did ship the hyphenated form.
+    || userAgent.includes('vkandroidapp')
     || userAgent.includes('vk-android')
     || userAgent.includes('vkontakte');
-  if (hasVkParams || hasVkUserAgentSignal) {
+  if (hasVkParams || hasVkNativeBridge || hasVkUserAgentSignal) {
     persistConfirmedPlatform('vk');
     return 'vk';
   }
