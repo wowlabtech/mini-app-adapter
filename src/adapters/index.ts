@@ -1,4 +1,4 @@
-import { hasWebviewProxy, retrieveRawLaunchParams } from '@tma.js/bridge';
+import { retrieveRawLaunchParams } from '@tma.js/bridge';
 
 import { ShellMiniAppAdapter } from '@/adapters/shellAdapter';
 import { TelegramMiniAppAdapter } from '@/adapters/telegramAdapter';
@@ -134,11 +134,21 @@ export function detectPlatform(): MiniAppPlatform {
     }
   };
   const hasTelegramParams = hasParam('tgWebAppPlatform', 'tgWebAppVersion', 'tgWebAppData', 'tgWebAppLanguage');
-  // TelegramWebviewProxy is injected by the native/desktop Telegram clients into every
-  // page the webview loads, so it survives a process-kill reload that lost both the
-  // launch params and sessionStorage. Telegram-web (iframe) has no sync marker, but a
-  // browser tab keeps sessionStorage across backgrounding, so it is already covered.
-  if (hasTelegramParams || hasWebviewProxy(window) || canRetrieveTelegramLaunchParams()) {
+  // Classify as a Telegram Mini App ONLY when real launch params exist — either present
+  // in this URL or recoverable by the SDK (it reads the URL, performance entries and its
+  // own sessionStorage cache, so same-session SPA navigations and reloads stay covered).
+  //
+  // We intentionally do NOT treat `TelegramWebviewProxy` alone as Telegram: the native
+  // clients inject that proxy into their ORDINARY in-app browser too (a plain https link
+  // tapped in a chat), where no Mini App launch params exist and never will. Keying off
+  // the proxy branded those tabs `telegram`, after which `retrieveLaunchParams()` threw
+  // `LaunchParamsRetrieveError` and auth broke — when the tab should simply behave as web.
+  //
+  // Trade-off: the rare "OS reclaimed the webview process AND wiped sessionStorage, then
+  // Telegram restored a real Mini App at an already-cleaned SPA URL" case now degrades to
+  // `web` (phone auth) instead of `telegram`. That is a graceful fallback, not a crash,
+  // and is preferable to mis-serving every in-app-browser visitor.
+  if (hasTelegramParams || canRetrieveTelegramLaunchParams()) {
     persistConfirmedPlatform('telegram');
     return 'telegram';
   }
