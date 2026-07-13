@@ -138,11 +138,31 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
       });
     }
 
-    initData.restore();
+    try {
+      initData.restore();
+    } catch (error) {
+      // restore() reads the launch params under the hood, so it throws in the same
+      // no-params case handled below. Not fatal — continue without init data.
+      console.warn('[tvm-app-adapter] initData.restore failed; continuing without init data:', error);
+    }
 
     miniApp.ready();
 
-    const launchParams = retrieveLaunchParams();
+    // Telegram injects `TelegramWebviewProxy` into its ordinary in-app browser as well
+    // as into real Mini Apps, so `detectPlatform()` legitimately routes a proxy-only tab
+    // here even though it carries NO launch params (e.g. a user tapping a plain deep link
+    // in a chat, or a process-kill reload that lost both the params and sessionStorage).
+    // `retrieveLaunchParams()` then throws `LaunchParamsRetrieveError`. Degrade to a
+    // limited session instead of failing init: the app still boots, `miniApp.mount` /
+    // viewport gate themselves on availability below, and `getLaunchParams()` already
+    // tolerates the missing params. Previously this threw straight out of `init()` and
+    // flooded error tracking with a benign "opened outside a Mini App" condition.
+    let launchParams: ReturnType<typeof retrieveLaunchParams> | undefined;
+    try {
+      launchParams = retrieveLaunchParams();
+    } catch (error) {
+      console.warn('[tvm-app-adapter] launch params unavailable; continuing in limited mode:', error);
+    }
 
     backButton.mount.ifAvailable();
 
@@ -156,7 +176,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
 
     const environment: MiniAppEnvironmentInfo = {
       platform: 'telegram',
-      sdkVersion: launchParams.tgWebAppVersion,
+      sdkVersion: launchParams?.tgWebAppVersion,
       languageCode: initData.user()?.language_code,
       appearance: this.readThemeParamsAppearance(),
       isWebView: true,
