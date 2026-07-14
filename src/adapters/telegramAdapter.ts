@@ -977,11 +977,11 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
   }
 
   // Reduces a Telegram link to the `path_full` form `web_app_open_tg_link`
-  // expects. Returns undefined for links outside telegram.me so the caller can fall
+  // expects. Returns undefined for links outside t.me so the caller can fall
   // back to a regular navigation.
   private toTelegramPathFull(url: string): string | undefined {
     try {
-      const parsed = new URL(url, 'https://telegram.me');
+      const parsed = new URL(url, 'https://t.me');
       const host = parsed.hostname.toLowerCase();
       if (!['t.me', 'telegram.me', 'telegram.dog'].includes(host)) {
         return undefined;
