@@ -6,6 +6,8 @@ export type {
   MiniAppLaunchParams,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
+  MiniAppScanErrorCode,
+  MiniAppScanResult,
   MiniAppPlatform,
   MiniAppViewportState,
   MiniAppViewRestoreData,
@@ -85,4 +87,9 @@ export {
   readShellPlatform,
   requestShellPushPermission,
   storeShellToken,
+  ShellQrError,
+} from '@/lib/shell';
+
+export type {
+  ShellQrErrorReason,
 } from '@/lib/shell';

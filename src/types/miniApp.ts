@@ -156,6 +156,42 @@ export interface MiniAppQrScanOptions {
   closeOnCapture?: boolean;
 }
 
+/**
+ * Why a scan did not produce a value. Granularity is platform-bound:
+ * - `web` (getUserMedia) distinguishes all camera-level codes below;
+ * - `vk`/`telegram` own the camera inside the host, so they mostly surface
+ *   `unknown` (with `cancelled` when the user closes the scanner);
+ * - `shell` (native iOS/Android) can only report a code once the native side
+ *   sends it over the `nativeQRError` bridge callback — otherwise a hung/closed
+ *   scanner collapses into `timeout`.
+ */
+export type MiniAppScanErrorCode =
+  /** Camera permission refused. Web: NotAllowedError/SecurityError — Safari
+   *  stops prompting after a few refusals and lands here immediately. */
+  | 'permission_denied'
+  /** No usable camera on the device. Web: NotFoundError/OverconstrainedError. */
+  | 'no_camera'
+  /** Camera held by another app/track. Web: NotReadableError/AbortError. */
+  | 'camera_busy'
+  /** getUserMedia is unavailable because the page is not a secure context. */
+  | 'insecure_context'
+  /** The current platform/host cannot scan at all. */
+  | 'unsupported'
+  /** Native scanner never answered (shell bridge). */
+  | 'timeout'
+  /** Anything not classified above. */
+  | 'unknown';
+
+/**
+ * Unified scan outcome returned by `scanQRCode` on every platform.
+ * `cancelled` is a normal user action (closed the scanner), not an error —
+ * callers should stay silent for it and only surface `error`.
+ */
+export type MiniAppScanResult =
+  | { status: 'success'; data: string }
+  | { status: 'cancelled' }
+  | { status: 'error'; code: MiniAppScanErrorCode; cause?: unknown };
+
 export interface MiniAppViewRestoreData {
   /**
    * New webview location (URL fragment, without `#`) if the host provided one.
@@ -325,9 +361,11 @@ export interface MiniAppAdapter {
   showPopup: (options: MiniAppPopupOptions) => Promise<string | null>;
 
   /**
-   * Opens QR scanner and resolves with scanned value (if any).
+   * Opens the QR scanner and resolves with a unified {@link MiniAppScanResult}
+   * across all platforms: `success` with the payload, `cancelled` when the user
+   * closes it, or `error` with a {@link MiniAppScanErrorCode}. Never rejects.
    */
-  scanQRCode: (options?: MiniAppQrScanOptions) => Promise<string | null>;
+  scanQRCode: (options?: MiniAppQrScanOptions) => Promise<MiniAppScanResult>;
 
   /**
    * Requests phone number from the host platform if supported.

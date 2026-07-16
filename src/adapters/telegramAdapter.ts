@@ -45,6 +45,7 @@ import type {
   MiniAppLaunchParams,
   MiniAppPopupOptions,
   MiniAppQrScanOptions,
+  MiniAppScanResult,
   MiniAppShareStoryOptions,
   MiniAppViewportInsets,
 } from '@/types/miniApp';
@@ -417,7 +418,7 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     return response ?? null;
   }
 
-  override async scanQRCode(options?: MiniAppQrScanOptions): Promise<string | null> {
+  override async scanQRCode(options?: MiniAppQrScanOptions): Promise<MiniAppScanResult> {
     let result: string | null = null;
     const closeOnCapture = options?.closeOnCapture ?? true;
 
@@ -431,12 +432,19 @@ export class TelegramMiniAppAdapter extends BaseMiniAppAdapter {
     });
 
     if (!qrScannerResult.ok) {
+      // No native scanner in this Telegram host — base resolves `unsupported`.
       return super.scanQRCode(options);
     }
 
-    await qrScannerResult.value;
+    try {
+      await qrScannerResult.value;
+    } catch (error) {
+      // Telegram runs the camera and its permission UI itself, so a rejection is
+      // an unexpected scanner failure, not a classifiable camera state.
+      return { status: 'error', code: 'unknown', cause: error };
+    }
 
-    return result;
+    return result ? { status: 'success', data: result } : { status: 'cancelled' };
   }
 
   override async closeApp(): Promise<void> {

@@ -1,9 +1,10 @@
 import jsQR from "jsqr";
 
 import { BaseMiniAppAdapter } from './baseAdapter';
-import type { MiniAppCapability, MiniAppQrScanOptions } from '@/types/miniApp';
+import type { MiniAppCapability, MiniAppQrScanOptions, MiniAppScanResult } from '@/types/miniApp';
 import { triggerFileDownload } from '@/lib/download';
 import { shareNative } from '@/lib/nativeShare';
+import { classifyGetUserMediaError } from '@/lib/scanErrors';
 
 export class WebMiniAppAdapter extends BaseMiniAppAdapter {
   private deferredPrompt: BeforeInstallPromptEvent | null = null;
@@ -49,10 +50,21 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  override scanQRCode(_options?: MiniAppQrScanOptions): Promise<string | null> {
-    return new Promise(async (resolve) => {
+  override scanQRCode(_options?: MiniAppQrScanOptions): Promise<MiniAppScanResult> {
+    return new Promise<MiniAppScanResult>(async (resolve) => {
       if (typeof document === 'undefined') {
-        resolve(null);
+        resolve({ status: 'error', code: 'unsupported' });
+        return;
+      }
+
+      // getUserMedia is gated behind a secure context. On plain http (e.g. a LAN
+      // IP during testing) navigator.mediaDevices is undefined — bail before
+      // building the scanner UI instead of throwing mid-stream.
+      if (!navigator.mediaDevices?.getUserMedia) {
+        resolve({
+          status: 'error',
+          code: window.isSecureContext === false ? 'insecure_context' : 'unsupported',
+        });
         return;
       }
 
@@ -218,7 +230,7 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       let lastScanAt = 0;
 
       let closed = false;
-      const finalize = async (result: string | null) => {
+      const finalize = async (result: MiniAppScanResult) => {
         if (closed) {
           return;
         }
@@ -245,16 +257,17 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
       };
 
       const removeFromBag = this.registerDisposable(() => {
-        void finalize(null);
+        // View torn down under us — treat as a user-initiated close.
+        void finalize({ status: 'cancelled' });
       });
 
-      const closeScanner = (result: string | null) => {
+      const closeScanner = (result: MiniAppScanResult) => {
         void finalize(result);
         removeFromBag();
       };
 
-      closeBtn.onclick = () => closeScanner(null);
-      bottomCloseBtn.onclick = () => closeScanner(null);
+      closeBtn.onclick = () => closeScanner({ status: 'cancelled' });
+      bottomCloseBtn.onclick = () => closeScanner({ status: 'cancelled' });
 
       // ===============================================
       //  START CAM
@@ -362,7 +375,7 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
                 inversionAttempts: "dontInvert",
               });
               if (result?.data) {
-                closeScanner(result.data);
+                closeScanner({ status: 'success', data: result.data });
                 return;
               }
               lastScanAt = now;
@@ -373,8 +386,10 @@ export class WebMiniAppAdapter extends BaseMiniAppAdapter {
 
         rafId = requestAnimationFrame(scanFrame);
       } catch (error) {
+        // The camera failure surfaces here via the `!stream` throw above, so the
+        // original DOMException.name is intact for classification.
         console.error("QR Start error", error);
-        closeScanner(null);
+        closeScanner({ status: 'error', code: classifyGetUserMediaError(error), cause: error });
       }
     });
   }

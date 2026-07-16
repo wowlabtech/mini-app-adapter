@@ -33,6 +33,7 @@ type ShellWindow = Window &
     nativePushToken?: (token: string) => void;
     nativeDeepLink?: (path: string) => void;
     nativeQRResult?: (value: string) => void;
+    nativeQRError?: (reason: string) => void;
     nativeAppActive?: () => void;
     nativeAppBackground?: () => void;
   };
@@ -47,6 +48,44 @@ type PendingQrRequest = {
   timeoutId: ReturnType<typeof setTimeout>;
 };
 
+/**
+ * Reasons the native shell can report over the `nativeQRError` callback. These
+ * mirror the camera-level scan codes so the shell adapter can pass them straight
+ * through. Native iOS/Android must send one of these strings; anything else is
+ * normalized to `unknown`.
+ */
+export type ShellQrErrorReason =
+  | 'permission_denied'
+  | 'no_camera'
+  | 'camera_busy'
+  | 'cancelled'
+  | 'unknown';
+
+const SHELL_QR_ERROR_REASONS: readonly ShellQrErrorReason[] = [
+  'permission_denied',
+  'no_camera',
+  'camera_busy',
+  'cancelled',
+  'unknown',
+] as const;
+
+/** Carries the native reason so the shell adapter can map it to a scan code. */
+export class ShellQrError extends Error {
+  readonly reason: ShellQrErrorReason;
+
+  constructor(reason: ShellQrErrorReason) {
+    super(`Native QR failed: ${reason}`);
+    this.name = 'ShellQrError';
+    this.reason = reason;
+  }
+}
+
+function normalizeShellQrReason(reason: unknown): ShellQrErrorReason {
+  return SHELL_QR_ERROR_REASONS.includes(reason as ShellQrErrorReason)
+    ? (reason as ShellQrErrorReason)
+    : 'unknown';
+}
+
 const pushListeners = new Set<PushListener>();
 const deepLinkListeners = new Set<DeepLinkListener>();
 const activeListeners = new Set<VoidListener>();
@@ -60,6 +99,7 @@ export interface ShellBridgeConfig {
   platformFlag: string;
   pushTokenCallback: string;
   qrResultCallback: string;
+  qrErrorCallback: string;
   deepLinkCallback: string;
   appActiveCallback: string;
   appBackgroundCallback: string;
@@ -69,6 +109,7 @@ const DEFAULT_BRIDGE_CONFIG: ShellBridgeConfig = {
   platformFlag: 'nativePlatform',
   pushTokenCallback: 'nativePushToken',
   qrResultCallback: 'nativeQRResult',
+  qrErrorCallback: 'nativeQRError',
   deepLinkCallback: 'nativeDeepLink',
   appActiveCallback: 'nativeAppActive',
   appBackgroundCallback: 'nativeAppBackground',
@@ -81,7 +122,8 @@ type BridgeCallbackKey =
   | 'deepLinkCallback'
   | 'appActiveCallback'
   | 'appBackgroundCallback'
-  | 'qrResultCallback';
+  | 'qrResultCallback'
+  | 'qrErrorCallback';
 
 let installedCallbackNames: Partial<Record<BridgeCallbackKey, string>> = {};
 
@@ -291,6 +333,18 @@ function installGlobalCallbacks(): void {
     }
     clearTimeout(pendingQrRequest.timeoutId);
     pendingQrRequest.resolve(value);
+    pendingQrRequest = null;
+  });
+
+  // Error channel for the native scanner. Without this the native side can only
+  // report success, so a denied/cancelled scan silently hangs until the 60s
+  // timeout. Native must call it with a ShellQrErrorReason.
+  assignCallback('qrErrorCallback', (reason: unknown) => {
+    if (!pendingQrRequest) {
+      return;
+    }
+    clearTimeout(pendingQrRequest.timeoutId);
+    pendingQrRequest.reject(new ShellQrError(normalizeShellQrReason(reason)));
     pendingQrRequest = null;
   });
 }

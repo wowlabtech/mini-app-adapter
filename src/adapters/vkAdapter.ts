@@ -23,6 +23,7 @@ import type {
   MiniAppInitOptions,
   MiniAppLaunchParams,
   MiniAppQrScanOptions,
+  MiniAppScanResult,
   MiniAppShareStoryOptions,
   MiniAppViewRestoreData,
 } from '@/types/miniApp';
@@ -31,6 +32,20 @@ import { computeCombinedSafeArea, createSafeAreaWatcher, readCssSafeArea } from 
 
 const ANALYTICS_EVENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,63}$/i;
 const ANALYTICS_FALLBACK_EVENT = 'VK_ANALYTICS_EVENT';
+
+// VK rejects VKWebAppOpenCodeReader with client_error code 4 ("User denied")
+// when the reader is closed by the user. Treat that as a cancel rather than an
+// error; anything else is an unexpected failure.
+function isVkUserDismiss(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const errorData = (error as { error_data?: { error_code?: number; error_reason?: unknown } }).error_data;
+  const reason = errorData?.error_reason;
+
+  return errorData?.error_code === 4 || (typeof reason === 'string' && /denied|cancel/i.test(reason));
+}
 
 // The client may deliver the same relaunch location via several channels at
 // once (bridge event + hashchange on web); re-emitting it would make consumers
@@ -355,19 +370,25 @@ export class VKMiniAppAdapter extends BaseMiniAppAdapter {
     }
   }
 
-  override async scanQRCode(options?: MiniAppQrScanOptions): Promise<string | null> {
+  override async scanQRCode(options?: MiniAppQrScanOptions): Promise<MiniAppScanResult> {
     const supportsQrScanner = await this.supportsBridgeMethod('VKWebAppOpenCodeReader');
-    
+
     if (!supportsQrScanner) {
+      // No native reader here — base resolves `unsupported`.
       return super.scanQRCode(options);
     }
 
     try {
       const data = await bridge.send('VKWebAppOpenCodeReader');
-      return data.code_data ? data.code_data : null;
+      return data.code_data ? { status: 'success', data: data.code_data } : { status: 'cancelled' };
     } catch (error) {
+      // VK owns the camera and its permission prompt, so a rejection is almost
+      // always the user closing the reader (client_error code 4). We can't tell
+      // a genuine permission denial apart from that here.
       console.warn('[tvm-app-adapter] VK scanQRCode failed:', error);
-      return super.scanQRCode(options);
+      return isVkUserDismiss(error)
+        ? { status: 'cancelled' }
+        : { status: 'error', code: 'unknown', cause: error };
     }
   }
 

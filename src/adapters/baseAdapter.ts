@@ -13,6 +13,7 @@ import {
   type MiniAppPlatform,
   type MiniAppPopupOptions,
   type MiniAppQrScanOptions,
+  type MiniAppScanResult,
   type MiniAppViewRestoreData,
   type MiniAppViewportInsets,
 } from '@/types/miniApp';
@@ -290,8 +291,10 @@ export abstract class BaseMiniAppAdapter implements MiniAppAdapter {
     return firstButton?.id ?? 'ok';
   }
 
-  async scanQRCode(_options?: MiniAppQrScanOptions): Promise<string | null> {
-    return null;
+  async scanQRCode(_options?: MiniAppQrScanOptions): Promise<MiniAppScanResult> {
+    // Reached only as the platform fallback when a host cannot scan (e.g. VK/TG
+    // without their native reader). No camera path here, so it is unsupported.
+    return { status: 'error', code: 'unsupported' };
   }
 
   async requestPhone(): Promise<string | null> {
